@@ -77,8 +77,14 @@ Model weights are available on our [HuggingFace collection](https://huggingface.
 git clone https://github.com/bowang-lab/BioReason-Pro.git
 cd BioReason-Pro
 
-# Install package
+# Install ESM (must use --no-deps due to transformers version conflict with vllm)
+pip install esm --no-deps
+
+# Install package (pulls torch, vllm, transformers, and all other dependencies)
 pip install -e .
+
+# Install flash-attn last (requires torch to be already installed, must build from source)
+pip install flash-attn --no-build-isolation --no-cache-dir
 ```
 
 <br>
