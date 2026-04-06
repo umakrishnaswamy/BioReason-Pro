@@ -6,6 +6,8 @@ import types
 import unittest
 from pathlib import Path
 
+import pandas as pd
+
 
 ROOT = Path(__file__).resolve().parents[1]
 CAFA_EVALS_PATH = ROOT / "evals" / "cafa_evals.py"
@@ -53,6 +55,26 @@ CAFA_EVALS = load_cafa_eval_module()
 
 
 class CafaEvalContractTests(unittest.TestCase):
+    def test_extract_metrics_summary_covers_all_three_namespaces(self):
+        best_f_df = pd.DataFrame(
+            {
+                "f": [0.2, 0.9, 0.7],
+                "f_w": [0.3, 0.8, 0.6],
+            },
+            index=pd.Index(
+                ["biological_process", "molecular_function", "cellular_component"],
+                name="ns",
+            ),
+        )
+        dummy_eval_df = pd.DataFrame({"unused": []})
+
+        metrics = CAFA_EVALS.extract_metrics_summary((dummy_eval_df, {"f": best_f_df}))
+
+        self.assertEqual(metrics["biological_process_f1"], 0.2)
+        self.assertEqual(metrics["molecular_function_f1"], 0.9)
+        self.assertEqual(metrics["cellular_component_f1"], 0.7)
+        self.assertAlmostEqual(metrics["overall_mean_f1"], (0.2 + 0.9 + 0.7) / 3)
+
     def test_normalize_metrics_for_logging_adds_fmax_aliases(self):
         metrics = {
             "biological_process_f1": 0.2,

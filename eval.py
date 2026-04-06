@@ -19,6 +19,7 @@ import csv
 import json
 import os
 import time
+from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Tuple
 import torch
 from tqdm import tqdm
@@ -46,6 +47,25 @@ RUN_SUMMARY_FILE = "run_summary.json"
 SAMPLE_TABLE_FILE = "sample_results.tsv"
 REASONING_OPEN_TAG = "<think>"
 REASONING_CLOSE_TAG = "</think>"
+SAMPLE_TABLE_FIELDNAMES = [
+    "protein_id",
+    "go_aspect",
+    "split",
+    "model_name",
+    "prompt",
+    "prediction",
+    "expected_output",
+    "accuracy_or_match_note",
+    "reasoning_excerpt",
+    "reasoning_full",
+    "final_answer",
+    "intermediate_trace",
+    "success",
+    "attempt_count",
+    "successful_attempt_count",
+    "attempt_file_names",
+    "attempt_predictions_json",
+]
 
 # GO Aspect mapping for cleaner filenames
 GO_ASPECT_CODES = {"molecular_function": "MF", "cellular_component": "CC", "biological_process": "BP"}
@@ -317,33 +337,72 @@ def collect_result_rows(evals_path: str) -> List[Dict[str, Any]]:
     return rows
 
 
+def group_result_rows_by_sample(result_rows: List[Dict[str, Any]]) -> "OrderedDict[Tuple[str, str], List[Dict[str, Any]]]":
+    """Group raw pass@k rows into one logical sample key."""
+    grouped: "OrderedDict[Tuple[str, str], List[Dict[str, Any]]]" = OrderedDict()
+    sorted_rows = sorted(
+        result_rows,
+        key=lambda row: (
+            row.get("protein_id", ""),
+            row.get("go_aspect", ""),
+            row.get("file_name", ""),
+        ),
+    )
+    for row in sorted_rows:
+        key = (row.get("protein_id", ""), row.get("go_aspect", ""))
+        grouped.setdefault(key, []).append(row)
+    return grouped
+
+
+def choose_representative_result_row(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Pick a deterministic representative row for one sample."""
+    if not rows:
+        raise ValueError("Representative row requested for an empty sample group")
+    successful_rows = [row for row in rows if row.get("success")]
+    return successful_rows[0] if successful_rows else rows[0]
+
+
 def build_sample_table_rows(args, result_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Convert saved JSON rows into richer sample rows for tracking backends."""
     rows: List[Dict[str, Any]] = []
     model_name = resolve_model_name(args)
 
-    for row in result_rows:
+    for (protein_id, go_aspect), sample_rows in group_result_rows_by_sample(result_rows).items():
+        row = choose_representative_result_row(sample_rows)
         prediction_fields = extract_reasoning_fields(row.get("generated_response", ""))
         ground_truth_fields = extract_reasoning_fields(row.get("ground_truth", ""))
         predicted_final = _normalize_text_for_match(prediction_fields["final_answer"])
         expected_final = _normalize_text_for_match(ground_truth_fields["final_answer"])
         exact_match = bool(predicted_final and expected_final and predicted_final == expected_final)
+        attempt_predictions = [sample_row.get("generated_response", "") for sample_row in sample_rows]
+        attempt_files = [sample_row.get("file_name", "") for sample_row in sample_rows]
+        successful_attempt_count = sum(1 for sample_row in sample_rows if sample_row.get("success"))
 
         rows.append(
             {
-                "protein_id": row.get("protein_id", ""),
-                "go_aspect": row.get("go_aspect", ""),
+                "protein_id": protein_id,
+                "go_aspect": go_aspect,
                 "split": args.eval_split,
                 "model_name": model_name,
                 "prompt": row.get("input_prompt", ""),
                 "prediction": row.get("generated_response", ""),
                 "expected_output": row.get("ground_truth", ""),
-                "accuracy_or_match_note": f"success={bool(row.get('success', False))}; exact_match={exact_match}",
+                "accuracy_or_match_note": (
+                    f"success={bool(row.get('success', False))}; "
+                    f"exact_match={exact_match}; "
+                    f"attempt_count={len(sample_rows)}; "
+                    f"successful_attempts={successful_attempt_count}; "
+                    "representative=first_success_or_first_attempt"
+                ),
                 "reasoning_excerpt": prediction_fields["reasoning_excerpt"],
                 "reasoning_full": prediction_fields["reasoning_full"],
                 "final_answer": prediction_fields["final_answer"],
                 "intermediate_trace": prediction_fields["intermediate_trace"],
                 "success": bool(row.get("success", False)),
+                "attempt_count": len(sample_rows),
+                "successful_attempt_count": successful_attempt_count,
+                "attempt_file_names": json.dumps(attempt_files, ensure_ascii=True),
+                "attempt_predictions_json": json.dumps(attempt_predictions, ensure_ascii=True),
             }
         )
 
@@ -467,18 +526,9 @@ def build_tracking_config(args, run_summary: Dict[str, Any], metrics_summary: Di
 
 
 def write_sample_results_table(rows: List[Dict[str, Any]], evals_path: str) -> str:
-    """Write a sample-level TSV that mirrors the saved JSON results."""
+    """Write a sample-level TSV with one row per logical sample."""
     output_path = os.path.join(evals_path, SAMPLE_TABLE_FILE)
-    fieldnames = [
-        "file_name",
-        "protein_id",
-        "go_aspect",
-        "success",
-        "sequence_length",
-        "input_prompt",
-        "ground_truth",
-        "generated_response",
-    ]
+    fieldnames = list(rows[0].keys()) if rows else SAMPLE_TABLE_FIELDNAMES
 
     with open(output_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter="\t")
@@ -927,7 +977,8 @@ def run_local_inference(args):
         dt = t_end - t_start
         print_final_statistics(successfully_processed, dt, args.evals_path)
         result_rows = collect_result_rows(args.evals_path)
-        sample_table_path = write_sample_results_table(result_rows, args.evals_path)
+        sample_rows = build_sample_table_rows(args, result_rows)
+        sample_table_path = write_sample_results_table(sample_rows, args.evals_path)
         run_summary = build_run_summary(
             args=args,
             loaded_samples=loaded_samples,

@@ -1,4 +1,6 @@
 import importlib.util
+import json
+import re
 import sys
 import tempfile
 import unittest
@@ -238,6 +240,95 @@ class Step0DiseaseTemporalSplitTests(unittest.TestCase):
         self.assertIn("| Split | Window | Proteins | Unique labels |", text)
         self.assertIn("| train | 213->221 | 4 | 8 | 11 | 1 | 2 | 3 | 2.00 |", text)
         self.assertIn("Counts are based on protein-disjoint assignment by earliest temporal appearance.", text)
+
+    def test_main_writes_required_step0_outputs_and_summary_contract(self):
+        release_frames = {
+            213: make_raw_df(),
+            221: make_raw_df(
+                ("P1", "GO:0001", "P", "EXP", "20240209"),
+                ("P2", "GO:0002", "F", "IDA", "20240209"),
+            ),
+            225: make_raw_df(
+                ("P1", "GO:0001", "P", "EXP", "20240209"),
+                ("P2", "GO:0002", "F", "IDA", "20240209"),
+                ("P1", "GO:0003", "C", "IMP", "20241020"),
+                ("P3", "GO:0004", "P", "IPI", "20241020"),
+            ),
+            228: make_raw_df(
+                ("P1", "GO:0001", "P", "EXP", "20240209"),
+                ("P2", "GO:0002", "F", "IDA", "20240209"),
+                ("P1", "GO:0003", "C", "IMP", "20241020"),
+                ("P3", "GO:0004", "P", "IPI", "20241020"),
+                ("P2", "GO:0005", "C", "EXP", "20250503"),
+                ("P4", "GO:0006", "F", "IMP", "20250503"),
+            ),
+        }
+
+        def fake_fetch_shortlist(output_path, query):
+            shortlist = pd.DataFrame({"Entry": ["P1", "P2", "P3", "P4"]})
+            shortlist.to_csv(output_path, sep="\t", index=False)
+            return shortlist
+
+        def fake_load_filtered_gaf(path):
+            match = re.search(r"_(\d+)\.gaf$", str(path))
+            if not match:
+                raise AssertionError(f"Unexpected GAF path: {path}")
+            release = int(match.group(1))
+            return release_frames[release].copy()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "step0_contract"
+            argv = [
+                "step0_disease_temporal_split.py",
+                "--output-dir",
+                str(output_dir),
+                "--skip-propagation",
+            ]
+
+            with mock.patch.object(sys, "argv", argv), mock.patch.object(
+                STEP0, "fetch_shortlist", side_effect=fake_fetch_shortlist
+            ), mock.patch.object(STEP0, "prepare_filtered_gaf", return_value=None), mock.patch.object(
+                STEP0, "load_filtered_gaf", side_effect=fake_load_filtered_gaf
+            ), mock.patch.object(
+                STEP0, "load_cafa5_train_minimal", side_effect=RuntimeError("gated")
+            ):
+                exit_code = STEP0.main()
+
+            self.assertEqual(exit_code, 0)
+
+            required_files = [
+                "summary.json",
+                "report.md",
+                "train_assigned_labels.tsv",
+                "dev_assigned_labels.tsv",
+                "test_assigned_labels.tsv",
+                "train_assigned_propagated.tsv",
+                "dev_assigned_propagated.tsv",
+                "test_assigned_propagated.tsv",
+                "train_assigned_nk_lk.tsv",
+                "dev_assigned_nk_lk.tsv",
+                "test_assigned_nk_lk.tsv",
+                "train_assigned_nk_lk_propagated.tsv",
+                "dev_assigned_nk_lk_propagated.tsv",
+                "test_assigned_nk_lk_propagated.tsv",
+                "nk_lk_eda.tsv",
+            ]
+            for filename in required_files:
+                self.assertTrue((output_dir / filename).exists(), filename)
+
+            summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["shortlist_mode"], "high-confidence")
+            self.assertEqual(summary["shortlist_proteins"], 4)
+            self.assertEqual(summary["nk_lk_status"], "skipped")
+            self.assertIn("gated", summary["nk_lk_error"])
+            self.assertTrue(summary["split_validation"]["time_order_valid"])
+            self.assertTrue(summary["split_validation"]["protein_disjoint_valid"])
+            self.assertEqual([window["split"] for window in summary["windows"]], ["train", "dev", "test"])
+
+            window_by_split = {window["split"]: window for window in summary["windows"]}
+            self.assertEqual(window_by_split["train"]["disease_proteins_after_assignment"], 2)
+            self.assertEqual(window_by_split["dev"]["disease_proteins_after_assignment"], 1)
+            self.assertEqual(window_by_split["test"]["disease_proteins_after_assignment"], 1)
 
 
 if __name__ == "__main__":

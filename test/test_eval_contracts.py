@@ -349,38 +349,51 @@ class EvalContractTests(unittest.TestCase):
             "input_prompt": "prompt",
             "sequence_length": 321,
         }
+        sample_record_k1 = {
+            **sample_record,
+            "generated_response": "GO:0003333",
+        }
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
             (tmp_path / "P12345_MF_k00.json").write_text(json.dumps(sample_record), encoding="utf-8")
+            (tmp_path / "P12345_MF_k01.json").write_text(json.dumps(sample_record_k1), encoding="utf-8")
             (tmp_path / EVAL.RUN_SUMMARY_FILE).write_text(json.dumps({"ignore": True}), encoding="utf-8")
             (tmp_path / EVAL.ERROR_LOG_FILE).write_text(json.dumps([{"ignore": True}]), encoding="utf-8")
 
-            rows = EVAL.collect_result_rows(str(tmp_path))
-            self.assertEqual(len(rows), 1)
-            self.assertEqual(rows[0]["protein_id"], "P12345")
+            result_rows = EVAL.collect_result_rows(str(tmp_path))
+            self.assertEqual(len(result_rows), 2)
+            self.assertEqual(result_rows[0]["protein_id"], "P12345")
 
-            sample_table_path = EVAL.write_sample_results_table(rows, str(tmp_path))
+            args = make_eval_args(eval_split="test", max_samples=10)
+            sample_rows = EVAL.build_sample_table_rows(args, result_rows)
+            self.assertEqual(len(sample_rows), 1)
+            self.assertEqual(sample_rows[0]["protein_id"], "P12345")
+            self.assertEqual(sample_rows[0]["attempt_count"], 2)
+            self.assertIn("attempt_count=2", sample_rows[0]["accuracy_or_match_note"])
+
+            sample_table_path = EVAL.write_sample_results_table(sample_rows, str(tmp_path))
             with open(sample_table_path, "r", newline="") as f:
                 reader = csv.DictReader(f, delimiter="\t")
                 written_rows = list(reader)
 
             self.assertEqual(len(written_rows), 1)
             self.assertEqual(written_rows[0]["protein_id"], "P12345")
-            self.assertEqual(written_rows[0]["generated_response"], "GO:0002222")
+            self.assertEqual(written_rows[0]["prediction"], "GO:0002222")
+            self.assertEqual(written_rows[0]["attempt_count"], "2")
+            self.assertIn("GO:0003333", written_rows[0]["attempt_predictions_json"])
 
-            args = make_eval_args(eval_split="test", max_samples=10)
             summary = EVAL.build_run_summary(
                 args=args,
                 loaded_samples=4,
                 remaining_samples=3,
                 newly_processed=2,
                 total_time=1.25,
-                result_rows=rows,
+                result_rows=result_rows,
             )
             self.assertEqual(summary["job_type"], "eval")
             self.assertEqual(summary["eval_split"], "test")
-            self.assertEqual(summary["result_files_total"], 1)
+            self.assertEqual(summary["result_files_total"], 2)
             self.assertEqual(summary["unique_sample_keys_total"], 1)
 
             summary_path = EVAL.write_run_summary(summary, str(tmp_path))
