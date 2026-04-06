@@ -15,6 +15,7 @@ Usage:
 """
 
 import argparse
+import csv
 import json
 import os
 import time
@@ -31,6 +32,8 @@ from bioreason2.utils import str2bool
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 STOP_TOKENS = ["<|im_end|>"]
 ERROR_LOG_FILE = "evaluation_errors.json"
+RUN_SUMMARY_FILE = "run_summary.json"
+SAMPLE_TABLE_FILE = "sample_results.tsv"
 
 # GO Aspect mapping for cleaner filenames
 GO_ASPECT_CODES = {"molecular_function": "MF", "cellular_component": "CC", "biological_process": "BP"}
@@ -81,10 +84,25 @@ def initialize_model(args) -> ProteinLLMModel:
     return model
 
 
+def select_eval_dataset(train_ds, val_ds, test_ds, eval_split: str):
+    """Select the requested evaluation split from a pre-split dataset triple."""
+    split_to_dataset = {
+        "validation": val_ds,
+        "test": test_ds,
+    }
+    if eval_split not in split_to_dataset:
+        raise ValueError(f"Unsupported eval split: {eval_split}")
+
+    dataset = split_to_dataset[eval_split]
+    if dataset is None or len(dataset) == 0:
+        raise ValueError(f"{eval_split.title()} dataset is empty or failed to load.")
+    return dataset
+
+
 def load_dataset(args):
-    """Load and prepare the CAFA-5 validation dataset."""
-    print("\n📥 Loading and preparing CAFA-5 validation dataset...")
-    _, val_ds, _ = load_cafa5_dataset(
+    """Load and prepare the requested CAFA-5 evaluation split."""
+    print(f"\n📥 Loading and preparing CAFA-5 {args.eval_split} dataset...")
+    train_ds, val_ds, test_ds = load_cafa5_dataset(
         dataset=args.cafa5_dataset,
         dataset_name=args.cafa5_dataset_name,
         cache_dir=args.dataset_cache_dir,
@@ -110,12 +128,10 @@ def load_dataset(args):
         add_uniprot_summary=args.add_uniprot_summary,
         debug=args.debug,
     )
-    val_ds = val_ds.shuffle(seed=args.seed)
+    eval_ds = select_eval_dataset(train_ds, val_ds, test_ds, args.eval_split)
+    eval_ds = eval_ds.shuffle(seed=args.seed)
 
-    if not val_ds or len(val_ds) == 0:
-        raise ValueError("Validation dataset is empty or failed to load.")
-
-    n_samples = len(val_ds) if args.max_samples <= 0 else min(args.max_samples, len(val_ds))
+    n_samples = len(eval_ds) if args.max_samples <= 0 else min(args.max_samples, len(eval_ds))
 
     # Handle chunking for multi-GPU processing
     if args.num_chunks > 1:
@@ -128,13 +144,16 @@ def load_dataset(args):
         else:
             end_idx = start_idx + chunk_size
 
-        print(f"Processing chunk {args.chunk_id + 1}/{args.num_chunks}: samples {start_idx} to {end_idx-1}")
-        samples = val_ds.select(range(start_idx, end_idx))
+        print(
+            f"Processing {args.eval_split} chunk {args.chunk_id + 1}/{args.num_chunks}: "
+            f"samples {start_idx} to {end_idx-1}"
+        )
+        samples = eval_ds.select(range(start_idx, end_idx))
     else:
-        print("📊 Processing full dataset (no chunking)")
-        samples = val_ds.select(range(n_samples))
+        print(f"📊 Processing full {args.eval_split} dataset (no chunking)")
+        samples = eval_ds.select(range(n_samples))
 
-    print(f"Loaded {len(samples)} samples for evaluation.")
+    print(f"Loaded {len(samples)} samples for evaluation from split: {args.eval_split}")
     return samples
 
 
@@ -151,6 +170,8 @@ def filter_unprocessed_samples(samples, evals_path: str) -> List[Dict[str, Any]]
         existing_files = os.listdir(evals_path)
         for filename in existing_files:
             if filename.endswith(".json"):
+                if filename in {ERROR_LOG_FILE, RUN_SUMMARY_FILE}:
+                    continue
                 # Parse filename: {protein_id}_{go_aspect_code}_k{i:02d}.json
                 parts = filename.split("_")
                 if len(parts) >= 2:
@@ -186,6 +207,106 @@ def save_result(result_record: Dict[str, Any], protein_id: str, go_aspect: str, 
 
     with open(result_filepath, "w") as f:
         json.dump(result_record, f, indent=4)
+
+
+def collect_result_rows(evals_path: str) -> List[Dict[str, Any]]:
+    """Collect saved per-sample JSON files into tabular rows."""
+    rows: List[Dict[str, Any]] = []
+    if not os.path.exists(evals_path):
+        return rows
+
+    for filename in sorted(os.listdir(evals_path)):
+        if not filename.endswith(".json"):
+            continue
+        if filename in {ERROR_LOG_FILE, RUN_SUMMARY_FILE}:
+            continue
+
+        filepath = os.path.join(evals_path, filename)
+        try:
+            with open(filepath, "r") as f:
+                record = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        if not isinstance(record, dict):
+            continue
+        if "protein_id" not in record or "go_aspect" not in record:
+            continue
+
+        rows.append(
+            {
+                "file_name": filename,
+                "protein_id": record.get("protein_id", ""),
+                "go_aspect": record.get("go_aspect", ""),
+                "success": bool(record.get("success", False)),
+                "sequence_length": record.get("sequence_length", 0),
+                "input_prompt": record.get("input_prompt", ""),
+                "ground_truth": record.get("ground_truth", ""),
+                "generated_response": record.get("generated_response", ""),
+            }
+        )
+
+    return rows
+
+
+def write_sample_results_table(rows: List[Dict[str, Any]], evals_path: str) -> str:
+    """Write a sample-level TSV that mirrors the saved JSON results."""
+    output_path = os.path.join(evals_path, SAMPLE_TABLE_FILE)
+    fieldnames = [
+        "file_name",
+        "protein_id",
+        "go_aspect",
+        "success",
+        "sequence_length",
+        "input_prompt",
+        "ground_truth",
+        "generated_response",
+    ]
+
+    with open(output_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter="\t")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+    return output_path
+
+
+def build_run_summary(
+    args,
+    loaded_samples: int,
+    remaining_samples: int,
+    newly_processed: int,
+    total_time: float,
+    result_rows: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Build a machine-readable summary for the evaluation run."""
+    unique_samples = {f"{row['protein_id']}::{row['go_aspect']}" for row in result_rows}
+    successful_rows = sum(1 for row in result_rows if row.get("success"))
+    return {
+        "job_type": "eval",
+        "eval_split": args.eval_split,
+        "dataset_name": args.cafa5_dataset_name,
+        "reasoning_dataset_name": args.reasoning_dataset_name,
+        "checkpoint_dir": args.ckpt_dir,
+        "max_samples": args.max_samples,
+        "pass_at_k": args.pass_at_k,
+        "loaded_samples": loaded_samples,
+        "remaining_samples_before_run": remaining_samples,
+        "newly_processed_samples": newly_processed,
+        "result_files_total": len(result_rows),
+        "unique_sample_keys_total": len(unique_samples),
+        "successful_result_files_total": successful_rows,
+        "duration_seconds": round(total_time, 3),
+    }
+
+
+def write_run_summary(summary: Dict[str, Any], evals_path: str) -> str:
+    """Persist the evaluation run summary as JSON."""
+    output_path = os.path.join(evals_path, RUN_SUMMARY_FILE)
+    with open(output_path, "w") as f:
+        json.dump(summary, f, indent=4, sort_keys=True)
+    return output_path
 
 
 def log_error(error_type: str, protein_id: str, go_aspect: str, go_bp: str, go_mf: str, go_cc: str, go_bp_leaf: str, go_mf_leaf: str, go_cc_leaf: str, error_msg: str = "") -> None:
@@ -306,7 +427,7 @@ def process_single_sample(
 
 def print_final_statistics(newly_processed: int, total_time: float, evals_path: str) -> None:
     """Print final evaluation statistics."""
-    total_files = len([f for f in os.listdir(evals_path) if f.endswith(".json")])
+    total_files = len(collect_result_rows(evals_path))
 
     print("\nEvaluation complete.")
     print(f"⏱️  Processed {newly_processed} new samples in {total_time:.2f}s")
@@ -328,9 +449,11 @@ def run_local_inference(args):
 
         # Load dataset
         samples = load_dataset(args)
+        loaded_samples = len(samples)
 
         # Filter out already processed samples
         unprocessed_samples = filter_unprocessed_samples(samples, args.evals_path)
+        remaining_samples = len(unprocessed_samples)
 
         # Main inference loop - only process unprocessed samples
         print(f"\nStarting inference loop with pass@{args.pass_at_k}...")
@@ -374,6 +497,19 @@ def run_local_inference(args):
         t_end = time.time()
         dt = t_end - t_start
         print_final_statistics(successfully_processed, dt, args.evals_path)
+        result_rows = collect_result_rows(args.evals_path)
+        sample_table_path = write_sample_results_table(result_rows, args.evals_path)
+        run_summary = build_run_summary(
+            args=args,
+            loaded_samples=loaded_samples,
+            remaining_samples=remaining_samples,
+            newly_processed=successfully_processed,
+            total_time=dt,
+            result_rows=result_rows,
+        )
+        summary_path = write_run_summary(run_summary, args.evals_path)
+        print(f"🧾 Sample-level TSV saved to: {sample_table_path}")
+        print(f"🧾 Run summary saved to: {summary_path}")
 
     except Exception as e:
         print(f"Critical Error: {e}")
@@ -495,6 +631,13 @@ def setup_argument_parser() -> argparse.ArgumentParser:
 
     # Evaluation controls
     eval_group = parser.add_argument_group("Evaluation Configuration")
+    eval_group.add_argument(
+        "--eval_split",
+        type=str,
+        choices=["validation", "test"],
+        default="validation",
+        help="Dataset split to evaluate. Use validation for development and test for final reporting.",
+    )
     eval_group.add_argument("--max_samples", type=int, default=-1, help="Max samples to process (-1 for all).")
     eval_group.add_argument("--max_new_tokens", type=int, default=1024)
     eval_group.add_argument("--temperature", type=float, default=0.1)

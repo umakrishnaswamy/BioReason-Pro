@@ -102,6 +102,7 @@ MIN_GO_MF_FREQ=1
 MIN_GO_BP_FREQ=1
 MIN_GO_CC_FREQ=1
 APPLY_GO_FILTERING_TO_VAL_TEST=False
+EVAL_SPLIT=${EVAL_SPLIT:-validation}
 
 # ===================================================================================================
 # Execute Evaluation
@@ -109,6 +110,7 @@ APPLY_GO_FILTERING_TO_VAL_TEST=False
 echo "Starting reasoning evaluation..."
 echo "Model checkpoint: $MODEL_PATH"
 echo "Protein model: $PROTEIN_MODEL_NAME"
+echo "Evaluation split: $EVAL_SPLIT"
 echo "Results will be saved to: $EVALS_PATH"
 
 mkdir -p "$EVALS_PATH"
@@ -148,6 +150,7 @@ python "$EVAL_SCRIPT" \
     --apply_go_filtering_to_val_test $APPLY_GO_FILTERING_TO_VAL_TEST \
     --seed 23 \
     --debug False \
+    --eval_split "$EVAL_SPLIT" \
     --max_samples $MAX_SAMPLES \
     --max_length_protein $MAX_LENGTH_PROTEIN \
     --max_new_tokens $MAX_NEW_TOKENS \
