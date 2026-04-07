@@ -19,6 +19,13 @@
 # Run from project root
 cd "$(dirname "$0")/.."
 
+REGISTRY_ENV_FILE=${REGISTRY_ENV_FILE:-"configs/disease_benchmark/wandb_registry_paths.env"}
+
+if [ -f "$REGISTRY_ENV_FILE" ]; then
+  # shellcheck disable=SC1090
+  source "$REGISTRY_ENV_FILE"
+fi
+
 # ===================================================================================================
 # Environment Setup
 # Set these to your conda environment and project root.
@@ -42,6 +49,7 @@ BASE_WANDB_PROJECT=${BASE_WANDB_PROJECT:-"bioreason-pro-finetune"}
 WANDB_ENTITY=${WANDB_ENTITY:-""}
 TEXT_MODEL_NAME="Qwen/Qwen3-4B-Thinking-2507"
 EXPERIMENT_NAME="reasoning-sft"
+MODEL_SOURCE_RESOLVER=${MODEL_SOURCE_RESOLVER:-"scripts/materialize_model_source.py"}
 
 # --- Paths: Set these to your local directories ---
 BASE_CHECKPOINT_DIR=${BASE_CHECKPOINT_DIR:-"data/artifacts/models/bioreason_pro_base"}
@@ -64,11 +72,11 @@ IS_SWISSPROT=False
 
 # --- Benchmark / Tracking Configuration ---
 BENCHMARK_VERSION="213 -> 221 -> 225 -> 228"
-TEMPORAL_SPLIT_ARTIFACT="disease-temporal-split:production"
-DATASET_CONFIG="disease_temporal_hc_v1"
+TEMPORAL_SPLIT_ARTIFACT=${TEMPORAL_SPLIT_ARTIFACT:-"${BIOREASON_MAIN_TEMPORAL_SPLIT_REGISTRY_PATH:-}"}
+DATASET_CONFIG="disease_temporal_hc_reasoning_v1"
 REASONING_DATASET_CONFIG="disease_temporal_hc_reasoning_v1"
-DATASET_ARTIFACT="disease-temporal-reasoning:production"
-BASE_CHECKPOINT=${BASE_CHECKPOINT:-"bioreason-pro-base:production"}
+DATASET_ARTIFACT=${DATASET_ARTIFACT:-"${BIOREASON_MAIN_REASONING_DATASET_REGISTRY_PATH:-}"}
+BASE_CHECKPOINT=${BASE_CHECKPOINT:-"${BIOREASON_BASE_MODEL_REGISTRY_PATH:-}"}
 SHORTLIST_MODE="high-confidence"
 SHORTLIST_QUERY="reviewed:true AND organism_id:9606 AND cc_disease:* AND (xref:mim-* OR xref:orphanet-*) AND (go_exp:* OR go_ida:* OR go_ipi:* OR go_igi:* OR go_imp:* OR go_iep:* OR go_ic:* OR go_tas:*)"
 TRAIN_START_RELEASE=213
@@ -88,6 +96,28 @@ ESM_LAYER=37
 INTERPRO_IN_PROMPT=True
 PREDICT_INTERPRO=False
 PPI_IN_PROMPT=True
+
+RESOLVED_BASE_MODEL_DIR=""
+if [ -z "$BASE_CHECKPOINT" ]; then
+  echo "Error: BASE_CHECKPOINT is not set. Publish and register bioreason-pro-base first."
+  exit 1
+fi
+
+echo "--- Resolving base model source for SFT from W&B Registry"
+RESOLVED_BASE_MODEL_DIR=$(python "$MODEL_SOURCE_RESOLVER" \
+  --wandb-registry-path "$BASE_CHECKPOINT" \
+  --local-dir "$BASE_CHECKPOINT_DIR" \
+  --required-path config.json)
+if [ -z "$RESOLVED_BASE_MODEL_DIR" ]; then
+  echo "Error: failed to resolve base model source from registry"
+  exit 1
+fi
+TEXT_MODEL_NAME="$RESOLVED_BASE_MODEL_DIR"
+echo "--- Base model materialized at $RESOLVED_BASE_MODEL_DIR"
+
+BASE_MODEL_PROJECTOR_WEIGHTS_PATH="${RESOLVED_BASE_MODEL_DIR:+$RESOLVED_BASE_MODEL_DIR/protein_projection.pt}"
+BASE_MODEL_GO_PROJECTOR_WEIGHTS_PATH="${RESOLVED_BASE_MODEL_DIR:+$RESOLVED_BASE_MODEL_DIR/go_projection.pt}"
+BASE_MODEL_GO_ENCODER_WEIGHTS_PATH="${RESOLVED_BASE_MODEL_DIR:+$RESOLVED_BASE_MODEL_DIR/go_encoder.pt}"
 
 
 BASE_COMMAND="srun python train_protein_llm.py \
@@ -182,6 +212,9 @@ WANDB_RUN_NAME_S1="stage1-$(basename ${TEXT_MODEL_NAME})-${EXPERIMENT_NAME}"
 mkdir -p $STAGE1_CHECKPOINT_DIR
 
 stdbuf -oL -eL $BASE_COMMAND \
+  ${BASE_MODEL_PROJECTOR_WEIGHTS_PATH:+--projector_checkpoint_path "$BASE_MODEL_PROJECTOR_WEIGHTS_PATH"} \
+  ${BASE_MODEL_GO_PROJECTOR_WEIGHTS_PATH:+--go_projection_checkpoint_path "$BASE_MODEL_GO_PROJECTOR_WEIGHTS_PATH"} \
+  ${BASE_MODEL_GO_ENCODER_WEIGHTS_PATH:+--go_encoder_checkpoint_path "$BASE_MODEL_GO_ENCODER_WEIGHTS_PATH"} \
   --run_name "${WANDB_RUN_NAME_S1}" \
   --checkpoint_artifact_name "${WANDB_RUN_NAME_S1}-checkpoints" \
   --cafa5_dataset_name $STAGE1_DATASET_NAME \

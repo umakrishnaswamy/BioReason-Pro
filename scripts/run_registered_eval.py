@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-Run registry-driven evaluation targets for the disease benchmark.
+Run W&B-registry-driven evaluation targets for the disease benchmark.
 
 This script removes the need to manually pass local model or dataset paths:
-- data lineage is resolved from a W&B-backed data bundle registry
-- public checkpoints are downloaded from Hugging Face when needed
-- private or internal checkpoints can be resolved from W&B artifacts
+- data lineage is resolved from a W&B Registry path manifest
+- model checkpoints are resolved from W&B Registry refs
 - external baseline prediction files can be evaluated from prediction artifacts
 """
 
@@ -27,6 +26,7 @@ from bioreason2.utils.research_registry import (
     RegistryError,
     apply_template_context,
     expand_target_group,
+    load_exported_env_file,
     load_data_bundle,
     load_eval_target,
     load_eval_target_registry,
@@ -40,6 +40,7 @@ DEFAULT_GO_OBO_PATH = str((ROOT / "bioreason2" / "dataset" / "go-basic.obo").res
 DEFAULT_STRUCTURE_DIR = str((ROOT / "data" / "structures").resolve())
 DEFAULT_EVAL_OUTPUT_ROOT = "data/artifacts/eval"
 DEFAULT_DATASET_CACHE_DIR = "data/artifacts/hf_cache"
+DEFAULT_REGISTRY_ENV_FILE = "configs/disease_benchmark/wandb_registry_paths.env"
 
 SAMPLE_TABLE_COLUMNS = [
     "protein_id",
@@ -63,31 +64,41 @@ SAMPLE_TABLE_COLUMNS = [
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run registry-driven disease benchmark evaluation.")
+    parser = argparse.ArgumentParser(description="Run disease benchmark evaluation from W&B Registry path manifests.")
     parser.add_argument("--target", type=str, default=None, help="Single evaluation target to run.")
     parser.add_argument(
         "--target-group",
         type=str,
         default=None,
-        help="Named target group from the evaluation registry.",
+        help="Named target group from the evaluation-target manifest.",
     )
     parser.add_argument(
         "--data-bundle",
         type=str,
         default=None,
-        help="Named data bundle from the data registry. Defaults to the registry default bundle.",
+        help="Named data bundle from the data-bundle manifest. Defaults to the manifest default bundle.",
     )
     parser.add_argument(
+        "--data-manifest-path",
         "--data-registry-path",
         type=str,
+        dest="data_manifest_path",
         default=DEFAULT_DATA_REGISTRY,
-        help="Path to the data bundle registry JSON.",
+        help="Path to the data-bundle W&B Registry path manifest JSON.",
     )
     parser.add_argument(
+        "--target-manifest-path",
         "--target-registry-path",
         type=str,
+        dest="target_manifest_path",
         default=DEFAULT_TARGET_REGISTRY,
-        help="Path to the evaluation target registry JSON.",
+        help="Path to the evaluation-target W&B Registry path manifest JSON.",
+    )
+    parser.add_argument(
+        "--registry-env-file",
+        type=str,
+        default=DEFAULT_REGISTRY_ENV_FILE,
+        help="Optional env file with W&B Registry refs for data and model artifacts.",
     )
     parser.add_argument(
         "--split",
@@ -100,7 +111,12 @@ def parse_args() -> argparse.Namespace:
         "--output-root",
         type=str,
         default=DEFAULT_EVAL_OUTPUT_ROOT,
-        help="Root directory for evaluation outputs.",
+        help="Root directory for temporary eval scratch outputs.",
+    )
+    parser.add_argument(
+        "--keep-local-eval-outputs",
+        action="store_true",
+        help="Keep local eval scratch after W&B logging instead of cleaning it up.",
     )
     parser.add_argument("--wandb-project", type=str, default=os.getenv("WANDB_PROJECT") or None)
     parser.add_argument("--wandb-entity", type=str, default=os.getenv("WANDB_ENTITY") or None)
@@ -182,7 +198,6 @@ def materialize_data_bundle(bundle: Mapping[str, Any]) -> Dict[str, Any]:
     resolved = normalize_bundle(bundle)
     output = dict(resolved)
     output["temporal_split_artifact"] = materialize_bundle_asset(resolved.get("temporal_split_artifact", {}))
-    output["supervised_dataset"] = materialize_bundle_asset(resolved.get("supervised_dataset", {}))
     output["reasoning_dataset"] = materialize_bundle_asset(resolved.get("reasoning_dataset", {}))
     return output
 
@@ -201,6 +216,16 @@ def ensure_parent(path_value: str) -> str:
     return path_value
 
 
+def resolve_dataset_loader_source(asset: Mapping[str, Any]) -> str:
+    """Prefer a downloaded local dataset artifact directory when available."""
+    local_dir = normalize_text(asset.get("local_dir")).strip()
+    if local_dir:
+        local_path = Path(local_dir)
+        if local_path.is_dir() and any(local_path.iterdir()):
+            return str(local_path)
+    return normalize_text(asset.get("dataset_source") or "wanglab/cafa5")
+
+
 def build_run_names(target_name: str, split: str, benchmark_alias: str) -> Dict[str, str]:
     suffix = f"{target_name}-{split}-{benchmark_alias}"
     return {
@@ -208,6 +233,31 @@ def build_run_names(target_name: str, split: str, benchmark_alias: str) -> Dict[
         "artifact_name": f"eval-{suffix}",
         "weave_eval_name": f"eval-{suffix}",
     }
+
+
+def wandb_can_be_source_of_truth(args: argparse.Namespace) -> bool:
+    project = normalize_text(args.wandb_project).strip()
+    if not project:
+        return False
+    mode = normalize_text(args.wandb_mode).strip().lower()
+    return mode not in {"offline", "disabled", "dryrun"}
+
+
+def should_cleanup_local_eval_outputs(args: argparse.Namespace) -> bool:
+    return (not getattr(args, "keep_local_eval_outputs", False)) and wandb_can_be_source_of_truth(args)
+
+
+def remove_local_eval_output(path_value: Path) -> None:
+    if path_value.exists():
+        shutil.rmtree(path_value)
+
+
+def remove_empty_parent(path_value: Path) -> None:
+    try:
+        if path_value.exists() and path_value.is_dir() and not any(path_value.iterdir()):
+            path_value.rmdir()
+    except OSError:
+        pass
 
 
 def run_shell_command(command: Sequence[str], env: Mapping[str, str]) -> None:
@@ -243,13 +293,13 @@ def run_protein_llm_target(
             "GO_EMBEDDINGS_PATH": runtime_paths["go_embeddings_path"],
             "DATASET_CACHE_DIR": runtime_paths["dataset_cache_dir"],
             "STRUCTURE_DIR": runtime_paths["structure_dir"],
-            "CAFA5_DATASET": normalize_text(bundle["reasoning_dataset"].get("dataset_source") or "wanglab/cafa5"),
+            "CAFA5_DATASET": resolve_dataset_loader_source(bundle["reasoning_dataset"]),
             "DATASET_NAME": normalize_text(bundle["reasoning_dataset"].get("dataset_name")),
             "REASONING_DATASET_NAME": normalize_text(bundle["reasoning_dataset"].get("dataset_name")),
             "EVAL_SPLIT": args.split,
             "BENCHMARK_VERSION": normalize_text(bundle.get("benchmark_version")),
-            "TEMPORAL_SPLIT_ARTIFACT": normalize_text(bundle["temporal_split_artifact"].get("artifact_path")),
-            "DATASET_ARTIFACT": normalize_text(bundle["reasoning_dataset"].get("artifact_path")),
+            "TEMPORAL_SPLIT_ARTIFACT": normalize_text(bundle["temporal_split_artifact"].get("wandb_registry_path")),
+            "DATASET_ARTIFACT": normalize_text(bundle["reasoning_dataset"].get("wandb_registry_path")),
             "MODEL_ARTIFACT": normalize_text(resolved_model.get("source_ref")),
             "SHORTLIST_QUERY": normalize_text(bundle.get("shortlist_query")),
             "SHORTLIST_MODE": normalize_text(bundle.get("shortlist_mode")),
@@ -269,9 +319,12 @@ def run_protein_llm_target(
             "WANDB_ARTIFACT_NAME": names["artifact_name"],
             "WEAVE_PROJECT": normalize_text(args.weave_project),
             "WEAVE_EVAL_NAME": names["weave_eval_name"],
+            "KEEP_LOCAL_EVAL_OUTPUTS": "1" if args.keep_local_eval_outputs else "0",
         }
     )
     run_shell_command(["bash", "scripts/sh_eval.sh"], env)
+    if should_cleanup_local_eval_outputs(args):
+        remove_empty_parent(output_dir)
 
     return {
         "target_name": target["target_name"],
@@ -309,9 +362,13 @@ def load_ground_truth_split(
     split: str,
     cache_dir: str,
 ) -> List[Dict[str, Any]]:
-    from datasets import load_dataset
+    from datasets import load_dataset, load_from_disk
 
-    dataset_dict = load_dataset(dataset_source, name=dataset_name, cache_dir=cache_dir)
+    dataset_path = Path(dataset_source)
+    if dataset_path.is_dir() and (dataset_path / "dataset_dict.json").exists():
+        dataset_dict = load_from_disk(str(dataset_path))
+    else:
+        dataset_dict = load_dataset(dataset_source, name=dataset_name, cache_dir=cache_dir)
     dataset_split = dataset_dict[split]
     rows: List[Dict[str, Any]] = []
     for sample in dataset_split:
@@ -435,9 +492,9 @@ def maybe_log_prediction_eval_to_wandb(
     config = {
         "job_type": "eval",
         "benchmark_version": bundle.get("benchmark_version"),
-        "temporal_split_artifact": bundle.get("temporal_split_artifact", {}).get("artifact_path"),
+        "temporal_split_artifact": bundle.get("temporal_split_artifact", {}).get("wandb_registry_path"),
         "dataset_config": bundle.get("reasoning_dataset", {}).get("dataset_name"),
-        "dataset_artifact": bundle.get("reasoning_dataset", {}).get("artifact_path"),
+        "dataset_artifact": bundle.get("reasoning_dataset", {}).get("wandb_registry_path"),
         "shortlist_query": bundle.get("shortlist_query"),
         "shortlist_mode": bundle.get("shortlist_mode"),
         "train_start_release": bundle.get("train_start_release"),
@@ -446,12 +503,13 @@ def maybe_log_prediction_eval_to_wandb(
         "test_end_release": bundle.get("test_end_release"),
         "model_name": target.get("display_name", target["target_name"]),
         "model_artifact": normalize_text(target.get("resolved_source_ref")),
-        "output_dir": results_dir,
+        "local_eval_outputs_retained": bool(args.keep_local_eval_outputs),
     }
 
     run = wandb.init(
         project=project,
         entity=normalize_text(args.wandb_entity).strip() or None,
+        dir=os.getenv("WANDB_DIR") or os.getcwd(),
         name=run_name,
         job_type="eval",
         mode=normalize_text(args.wandb_mode).strip() or None,
@@ -527,7 +585,7 @@ def run_prediction_artifact_target(
     prediction_map = parse_prediction_files(prediction_files)
 
     ground_truth_rows = load_ground_truth_split(
-        dataset_source=normalize_text(bundle["reasoning_dataset"].get("dataset_source")),
+        dataset_source=resolve_dataset_loader_source(bundle["reasoning_dataset"]),
         dataset_name=normalize_text(bundle["reasoning_dataset"].get("dataset_name")),
         split=args.split,
         cache_dir=runtime_paths["dataset_cache_dir"],
@@ -576,7 +634,7 @@ def run_prediction_artifact_target(
 
     names = build_run_names(target["target_name"], args.split, bundle["benchmark_alias"])
     target["resolved_source_ref"] = resolved_predictions.get("source_ref")
-    maybe_log_prediction_eval_to_wandb(
+    artifact_logged = maybe_log_prediction_eval_to_wandb(
         args=args,
         bundle=bundle,
         target=target,
@@ -585,6 +643,9 @@ def run_prediction_artifact_target(
         results_dir=str(results_dir),
         run_name=names["run_name"],
     )
+    if artifact_logged and should_cleanup_local_eval_outputs(args):
+        remove_local_eval_output(output_dir)
+        remove_empty_parent(output_dir.parent)
 
     return {
         "target_name": target["target_name"],
@@ -611,12 +672,18 @@ def run_target(
 
 def main() -> None:
     args = parse_args()
+    registry_env_file = normalize_text(args.registry_env_file).strip()
+    if registry_env_file:
+        if Path(registry_env_file).is_absolute():
+            load_exported_env_file(registry_env_file)
+        else:
+            load_exported_env_file(str((ROOT / registry_env_file).resolve()))
     runtime_paths = resolve_runtime_paths(args)
     Path(runtime_paths["dataset_cache_dir"]).mkdir(parents=True, exist_ok=True)
     Path(runtime_paths["output_root"]).mkdir(parents=True, exist_ok=True)
 
-    bundle = materialize_data_bundle(load_data_bundle(args.data_registry_path, args.data_bundle, ROOT))
-    registry = load_eval_target_registry(args.target_registry_path, ROOT)
+    bundle = materialize_data_bundle(load_data_bundle(args.data_manifest_path, args.data_bundle, ROOT))
+    registry = load_eval_target_registry(args.target_manifest_path, ROOT)
     target_names = expand_target_group(registry, args.target, args.target_group)
 
     statuses: List[Dict[str, Any]] = []
@@ -636,8 +703,9 @@ def main() -> None:
             is_optional = bool(target.get("optional"))
             if not (args.continue_on_error or (len(target_names) > 1 and is_optional)):
                 statuses.append(status)
-                suite_summary_path = Path(runtime_paths["output_root"]) / "suite_summary.json"
-                suite_summary_path.write_text(json.dumps({"statuses": statuses}, indent=2), encoding="utf-8")
+                if args.keep_local_eval_outputs:
+                    suite_summary_path = Path(runtime_paths["output_root"]) / "suite_summary.json"
+                    suite_summary_path.write_text(json.dumps({"statuses": statuses}, indent=2), encoding="utf-8")
                 raise
             failures.append(status)
         statuses.append(status)
@@ -649,8 +717,9 @@ def main() -> None:
         "statuses": statuses,
         "failures": failures,
     }
-    suite_summary_path = Path(runtime_paths["output_root"]) / "suite_summary.json"
-    suite_summary_path.write_text(json.dumps(suite_summary, indent=2, sort_keys=True), encoding="utf-8")
+    if args.keep_local_eval_outputs:
+        suite_summary_path = Path(runtime_paths["output_root"]) / "suite_summary.json"
+        suite_summary_path.write_text(json.dumps(suite_summary, indent=2, sort_keys=True), encoding="utf-8")
 
 
 if __name__ == "__main__":

@@ -77,7 +77,7 @@ class TrainingTrackingContractsTest(unittest.TestCase):
             max_epochs=10,
             job_time_limit="12:00:00",
             training_stage=2,
-            cafa5_dataset_name="disease_temporal_hc_v1",
+            cafa5_dataset_name="disease_temporal_hc_reasoning_v1",
             reasoning_dataset_name="disease_temporal_hc_reasoning_v1",
             ckpt_path=None,
             projector_checkpoint_path=None,
@@ -91,7 +91,7 @@ class TrainingTrackingContractsTest(unittest.TestCase):
             config["temporal_split_artifact"],
             "data/artifacts/benchmarks/213_221_225_228/temporal_split",
         )
-        self.assertEqual(config["dataset_config"], "disease_temporal_hc_v1")
+        self.assertEqual(config["dataset_config"], "disease_temporal_hc_reasoning_v1")
         self.assertEqual(config["reasoning_dataset_config"], "disease_temporal_hc_reasoning_v1")
         self.assertEqual(config["dataset_artifact"], "disease_temporal_hc_reasoning_v1:latest")
         self.assertEqual(config["model_artifact"], "disease-sft-checkpoints")

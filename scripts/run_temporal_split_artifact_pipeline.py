@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Prepare local storage, run the temporal split build, validate the outputs,
-and upload artifacts only when sanity checks pass.
+build datasets, and upload artifacts only when sanity checks pass.
 """
 
 from __future__ import annotations
@@ -56,10 +56,6 @@ class VariantConfig:
     @property
     def temporal_split_output_dir(self) -> str:
         return f"data/artifacts/benchmarks/{self.benchmark_dir_name}/temporal_split"
-
-    @property
-    def default_supervised_dir(self) -> str:
-        return f"data/artifacts/datasets/disease_temporal_hc_v1/{self.benchmark_dir_name}"
 
     @property
     def default_reasoning_dir(self) -> str:
@@ -159,6 +155,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Upload the temporal split artifact and dataset artifacts after sanity checks pass.",
     )
+    parser.add_argument(
+        "--build-datasets",
+        action="store_true",
+        help="Build the reasoning dataset before upload.",
+    )
+    parser.add_argument(
+        "--dataset-build-script",
+        default="scripts/build_disease_benchmark_datasets.py",
+        help="Path to the dataset build script.",
+    )
     parser.add_argument("--wandb-entity", default=os.getenv("WANDB_ENTITY"))
     parser.add_argument("--wandb-project", default=os.getenv("WANDB_PROJECT"))
     parser.add_argument(
@@ -168,19 +174,9 @@ def parse_args() -> argparse.Namespace:
         help="W&B artifact family for the temporal split artifact.",
     )
     parser.add_argument(
-        "--supervised-artifact-family",
-        default="disease-temporal-supervised",
-        help="W&B artifact family for supervised datasets.",
-    )
-    parser.add_argument(
         "--reasoning-artifact-family",
         default="disease-temporal-reasoning",
         help="W&B artifact family for reasoning datasets.",
-    )
-    parser.add_argument(
-        "--supervised-dir",
-        default=None,
-        help="Optional dataset directory to upload. Defaults to the variant-specific path.",
     )
     parser.add_argument(
         "--reasoning-dir",
@@ -230,12 +226,30 @@ def run_temporal_split_command(repo_root: Path, args: argparse.Namespace, varian
     }
 
 
+def run_dataset_build_command(repo_root: Path, args: argparse.Namespace, variant: VariantConfig) -> Dict[str, Any]:
+    dataset_build_script = repo_root / args.dataset_build_script
+    command = [
+        sys.executable,
+        str(dataset_build_script),
+        "--temporal-split-dir",
+        variant.temporal_split_output_dir,
+        "--reasoning-output-dir",
+        variant.default_reasoning_dir,
+    ]
+    log(f"[pipeline] building datasets for {variant.name}: {' '.join(command)}")
+    completed = subprocess.run(command, check=False)
+    return {
+        "command": command,
+        "returncode": completed.returncode,
+        "completed": completed.returncode == 0,
+    }
+
+
 def prepare_local_storage(repo_root: Path, variant: VariantConfig) -> Dict[str, Any]:
     directories = [
         repo_root / "data" / "artifacts",
         repo_root / "data" / "artifacts" / "eval",
         repo_root / variant.temporal_split_output_dir,
-        repo_root / variant.default_supervised_dir,
         repo_root / variant.default_reasoning_dir,
     ]
     created_dirs: List[str] = []
@@ -322,6 +336,9 @@ def build_upload_metadata(
     }
     if temporal_split_artifact_ref:
         metadata["temporal_split_artifact"] = temporal_split_artifact_ref
+    if artifact_kind == "reasoning_dataset":
+        metadata["dataset_source"] = "wanglab/cafa5"
+        metadata["dataset_name"] = "disease_temporal_hc_reasoning_v1"
     return metadata
 
 
@@ -392,29 +409,6 @@ def upload_variant_artifacts(
         )
     )
 
-    supervised_dir = resolve_dataset_dir(args.supervised_dir, variant.default_supervised_dir, repo_root)
-    if is_populated_directory(supervised_dir):
-        uploads.append(
-            upload_directory_artifact(
-                entity=entity,
-                project=project,
-                artifact_name=args.supervised_artifact_family,
-                local_dir=supervised_dir,
-                aliases=variant.artifact_aliases,
-                metadata=build_upload_metadata("supervised_dataset", supervised_dir, variant, temporal_split_ref),
-            )
-        )
-    else:
-        uploads.append(
-            {
-                "artifact_name": args.supervised_artifact_family,
-                "local_dir": str(supervised_dir),
-                "aliases": list(variant.artifact_aliases),
-                "uploaded": False,
-                "skip_reason": "directory_missing_or_empty",
-            }
-        )
-
     reasoning_dir = resolve_dataset_dir(args.reasoning_dir, variant.default_reasoning_dir, repo_root)
     if is_populated_directory(reasoning_dir):
         uploads.append(
@@ -456,6 +450,7 @@ def run_variant_pipeline(repo_root: Path, args: argparse.Namespace, variant: Var
         "upload_requested": bool(args.upload_to_wandb),
         "temporal_split_build": {},
         "sanity_check": {},
+        "dataset_build": {},
         "uploads": [],
         "ok": False,
     }
@@ -476,6 +471,16 @@ def run_variant_pipeline(repo_root: Path, args: argparse.Namespace, variant: Var
         pipeline_status["error"] = "Sanity check failed; skipping artifact upload."
         write_pipeline_status(output_dir, pipeline_status)
         return pipeline_status
+
+    if getattr(args, "build_datasets", False):
+        dataset_build_result = run_dataset_build_command(repo_root, args, variant)
+        pipeline_status["dataset_build"] = dataset_build_result
+        if not dataset_build_result["completed"]:
+            pipeline_status["error"] = (
+                f"Dataset build failed with return code {dataset_build_result['returncode']}"
+            )
+            write_pipeline_status(output_dir, pipeline_status)
+            return pipeline_status
 
     if args.upload_to_wandb:
         pipeline_status["uploads"] = upload_variant_artifacts(repo_root, args, variant)
@@ -499,6 +504,7 @@ def main() -> int:
             f"[pipeline] {variant_name}: "
             f"temporal_split_ok={status['temporal_split_build'].get('completed')}, "
             f"sanity_ok={status['sanity_check'].get('ok')}, "
+            f"dataset_build_ok={status['dataset_build'].get('completed', not getattr(args, 'build_datasets', False))}, "
             f"uploads={len(status.get('uploads', []))}"
         )
 

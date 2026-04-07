@@ -11,7 +11,7 @@ Features:
 - Professional argument parsing with grouped options
 
 Usage:
-    python eval.py --ckpt_dir /path/to/checkpoint --evals_path /path/to/results [options]
+    python eval.py --ckpt_dir /path/to/checkpoint --evals_path /path/to/scratch [options]
 """
 
 import argparse
@@ -590,15 +590,14 @@ def build_tracking_config(args, run_summary: Dict[str, Any], metrics_summary: Di
         "test_end_release": getattr(args, "test_end_release", None),
         "base_checkpoint": args.ckpt_dir,
         "model_artifact": getattr(args, "model_artifact", None),
-        "output_dir": args.evals_path,
         "seed": args.seed,
         "eval_split": args.eval_split,
         "pass_at_k": args.pass_at_k,
         "max_samples": args.max_samples,
-        "metrics_summary_path": run_summary.get("metrics_summary_path") or getattr(args, "metrics_summary_path", None),
         "result_files_total": run_summary.get("result_files_total"),
         "unique_sample_keys_total": run_summary.get("unique_sample_keys_total"),
         "successful_result_files_total": run_summary.get("successful_result_files_total"),
+        "local_eval_outputs_retained": bool(getattr(args, "keep_local_eval_outputs", False)),
     }
     config.update(
         {
@@ -679,10 +678,13 @@ def maybe_init_wandb_run(args, run_summary: Dict[str, Any], metrics_summary: Dic
     if not project:
         return None
 
+    wandb_dir = (getattr(args, "wandb_dir", None) or os.getenv("WANDB_DIR") or os.getcwd()).strip()
+    os.makedirs(wandb_dir, exist_ok=True)
+
     init_kwargs = {
         "project": project,
         "entity": (getattr(args, "wandb_entity", None) or os.getenv("WANDB_ENTITY") or None),
-        "dir": args.evals_path,
+        "dir": wandb_dir,
         "name": getattr(args, "wandb_run_name", None) or f"eval-{resolve_model_name(args)}-{args.eval_split}",
         "job_type": "eval",
         "config": build_tracking_config(args, run_summary, metrics_summary),
@@ -850,6 +852,56 @@ def log_eval_tracking(
     return tracking_status
 
 
+def should_cleanup_local_eval_outputs(args, tracking_status: Dict[str, Any]) -> Tuple[bool, str]:
+    """Decide whether local eval scratch can be removed after W&B logging."""
+    if getattr(args, "keep_local_eval_outputs", False):
+        return False, "keep_local_eval_outputs=true"
+    if not tracking_status.get("wandb_logged"):
+        return False, "wandb_not_logged"
+
+    wandb_mode = (getattr(args, "wandb_mode", None) or os.getenv("WANDB_MODE") or "").strip().lower()
+    if wandb_mode in {"offline", "disabled", "dryrun"}:
+        return False, f"wandb_mode={wandb_mode or 'unset'}"
+
+    project = (getattr(args, "wandb_project", None) or os.getenv("WANDB_PROJECT") or "").strip()
+    if not project:
+        return False, "wandb_project_missing"
+    return True, "wandb_is_source_of_truth"
+
+
+def maybe_cleanup_local_eval_outputs(args, tracking_status: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove local eval scratch when W&B already holds the run outputs."""
+    cleanup_allowed, reason = should_cleanup_local_eval_outputs(args, tracking_status)
+    status = {
+        "cleanup_attempted": False,
+        "cleanup_completed": False,
+        "cleanup_reason": reason,
+        "eval_scratch_retained": True,
+    }
+    if not cleanup_allowed:
+        return status
+
+    evals_path = getattr(args, "evals_path", None)
+    if not evals_path or not os.path.exists(evals_path):
+        status["cleanup_attempted"] = True
+        status["cleanup_completed"] = True
+        status["eval_scratch_retained"] = False
+        status["cleanup_reason"] = "scratch_missing"
+        return status
+
+    try:
+        shutil.rmtree(evals_path)
+    except OSError as exc:
+        status["cleanup_attempted"] = True
+        status["cleanup_reason"] = f"cleanup_failed:{exc}"
+        return status
+
+    status["cleanup_attempted"] = True
+    status["cleanup_completed"] = True
+    status["eval_scratch_retained"] = False
+    return status
+
+
 def log_error(evals_path: str, error_type: str, protein_id: str, go_aspect: str, go_bp: str, go_mf: str, go_cc: str, go_bp_leaf: str, go_mf_leaf: str, go_cc_leaf: str, error_msg: str = "") -> None:
     """Log errors to a centralized JSON file."""
     os.makedirs(evals_path, exist_ok=True)
@@ -976,8 +1028,8 @@ def print_final_statistics(newly_processed: int, total_time: float, evals_path: 
     print(f"⏱️  Processed {newly_processed} new samples in {total_time:.2f}s")
     if newly_processed > 0:
         print(f"📈 Processing rate: {newly_processed/total_time:.2f} samples/s")
-    print(f"💾 Total result files: {total_files} in directory: {evals_path}")
-    print("Individual JSON files saved for each protein_id + aspect combination")
+    print(f"💾 Scratch result files created: {total_files} in directory: {evals_path}")
+    print("Individual JSON files were created per protein_id + aspect combination before W&B logging")
 
 
 def run_local_inference(args):
@@ -1077,11 +1129,16 @@ def run_local_inference(args):
         )
         if metrics_summary_path:
             run_summary["metrics_summary_path"] = metrics_summary_path
+        summary_path = write_run_summary(run_summary, args.evals_path)
         tracking_status = log_eval_tracking(args, run_summary, result_rows, metrics_summary=metrics_summary)
         run_summary.update(tracking_status)
         summary_path = write_run_summary(run_summary, args.evals_path)
-        print(f"🧾 Sample-level TSV saved to: {sample_table_path}")
-        print(f"🧾 Run summary saved to: {summary_path}")
+        cleanup_status = maybe_cleanup_local_eval_outputs(args, tracking_status)
+        if cleanup_status["cleanup_completed"]:
+            print("🧾 Eval scratch was uploaded to W&B and removed locally.")
+        else:
+            print(f"🧾 Sample-level TSV saved to: {sample_table_path}")
+            print(f"🧾 Run summary saved to: {summary_path}")
         print(
             "🧾 Tracking status: "
             f"W&B={run_summary['wandb_logged']}, "
@@ -1243,7 +1300,12 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     # Output configuration
     output_group = parser.add_argument_group("Output Configuration")
     output_group.add_argument(
-        "--evals_path", type=str, required=True, help="Directory path to save individual evaluation results."
+        "--evals_path", type=str, required=True, help="Scratch directory path used during evaluation before W&B upload."
+    )
+    output_group.add_argument(
+        "--keep_local_eval_outputs",
+        action="store_true",
+        help="Keep local eval scratch after W&B logging instead of cleaning it up.",
     )
 
     tracking_group = parser.add_argument_group("Tracking Configuration")
@@ -1277,6 +1339,7 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     tracking_group.add_argument("--wandb_entity", type=str, default=None)
     tracking_group.add_argument("--wandb_run_name", type=str, default=None)
     tracking_group.add_argument("--wandb_artifact_name", type=str, default=None)
+    tracking_group.add_argument("--wandb_dir", type=str, default=None)
     tracking_group.add_argument(
         "--wandb_mode",
         type=str,

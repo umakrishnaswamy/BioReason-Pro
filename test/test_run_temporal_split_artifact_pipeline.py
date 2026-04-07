@@ -108,7 +108,6 @@ class RunTemporalSplitArtifactPipelineContractsTest(unittest.TestCase):
         self.assertIn(str((repo_root / "data" / "artifacts").resolve()), created_dirs)
         self.assertIn(str((repo_root / "data" / "artifacts" / "eval").resolve()), created_dirs)
         self.assertIn(str((repo_root / variant.temporal_split_output_dir).resolve()), created_dirs)
-        self.assertIn(str((repo_root / variant.default_supervised_dir).resolve()), created_dirs)
         self.assertIn(str((repo_root / variant.default_reasoning_dir).resolve()), created_dirs)
 
     def test_validate_temporal_split_outputs_matches_readme_contract(self):
@@ -131,9 +130,7 @@ class RunTemporalSplitArtifactPipelineContractsTest(unittest.TestCase):
             wandb_entity="demo",
             wandb_project="project",
             temporal_split_artifact_family="disease-temporal-split",
-            supervised_artifact_family="disease-temporal-supervised",
             reasoning_artifact_family="disease-temporal-reasoning",
-            supervised_dir=None,
             reasoning_dir=None,
             shortlist_mode="high-confidence",
             use_shell_filter=False,
@@ -168,9 +165,7 @@ class RunTemporalSplitArtifactPipelineContractsTest(unittest.TestCase):
             wandb_entity="demo",
             wandb_project="project",
             temporal_split_artifact_family="disease-temporal-split",
-            supervised_artifact_family="disease-temporal-supervised",
             reasoning_artifact_family="disease-temporal-reasoning",
-            supervised_dir=None,
             reasoning_dir=None,
             shortlist_mode="high-confidence",
             use_shell_filter=False,
@@ -204,9 +199,7 @@ class RunTemporalSplitArtifactPipelineContractsTest(unittest.TestCase):
             wandb_entity="demo",
             wandb_project="project",
             temporal_split_artifact_family="disease-temporal-split",
-            supervised_artifact_family="disease-temporal-supervised",
             reasoning_artifact_family="disease-temporal-reasoning",
-            supervised_dir=None,
             reasoning_dir=None,
         )
 
@@ -223,8 +216,6 @@ class RunTemporalSplitArtifactPipelineContractsTest(unittest.TestCase):
         self.assertTrue(uploads[0]["uploaded"])
         self.assertFalse(uploads[1]["uploaded"])
         self.assertEqual(uploads[1]["skip_reason"], "directory_missing_or_empty")
-        self.assertFalse(uploads[2]["uploaded"])
-        self.assertEqual(uploads[2]["skip_reason"], "directory_missing_or_empty")
 
 
 if __name__ == "__main__":

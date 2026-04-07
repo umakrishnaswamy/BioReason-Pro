@@ -47,7 +47,7 @@ mkdir -p "$TRANSFORMERS_CACHE"
 MODEL_PATH=${MODEL_PATH:-"/path/to/bioreason-pro-rl"}
 
 # ===================================================================================================
-# Paths: Set these to your local directories
+# Paths: scratch + caches used during evaluation
 # ===================================================================================================
 PROTEIN_MODEL_NAME=${PROTEIN_MODEL_NAME:-"esm3_sm_open_v1"}
 GO_OBO_PATH=${GO_OBO_PATH:-"bioreason2/dataset/go-basic.obo"}  # repo-local default
@@ -55,6 +55,8 @@ IA_FILE_PATH=${IA_FILE_PATH:-""}                   # e.g., /path/to/IA.txt
 GO_EMBEDDINGS_PATH=${GO_EMBEDDINGS_PATH:-""}       # e.g., /data/bioreason/go_embeddings
 DATASET_CACHE_DIR=${DATASET_CACHE_DIR:-"data/artifacts/hf_cache"}
 STRUCTURE_DIR=${STRUCTURE_DIR:-"data/structures"}
+KEEP_LOCAL_EVAL_OUTPUTS=${KEEP_LOCAL_EVAL_OUTPUTS:-0}
+WANDB_DIR=${WANDB_DIR:-"./wandb"}
 
 EVAL_SCRIPT="eval.py"
 EVALS_PATH=${EVALS_PATH:-"$EVALS_DIR/results"}
@@ -129,9 +131,10 @@ echo "Starting reasoning evaluation..."
 echo "Model checkpoint: $MODEL_PATH"
 echo "Protein model: $PROTEIN_MODEL_NAME"
 echo "Evaluation split: $EVAL_SPLIT"
-echo "Results will be saved to: $EVALS_PATH"
+echo "Scratch directory: $EVALS_PATH"
 
 mkdir -p "$EVALS_PATH"
+mkdir -p "$WANDB_DIR"
 
 CHUNK_ARGS=""
 if [ "$NUM_CHUNKS" -gt 1 ]; then
@@ -192,6 +195,9 @@ fi
 if [ -n "$WANDB_ARTIFACT_NAME" ]; then
     TRACKING_ARGS+=(--wandb_artifact_name "$WANDB_ARTIFACT_NAME")
 fi
+if [ -n "$WANDB_DIR" ]; then
+    TRACKING_ARGS+=(--wandb_dir "$WANDB_DIR")
+fi
 if [ -n "$WANDB_MODE" ]; then
     TRACKING_ARGS+=(--wandb_mode "$WANDB_MODE")
 fi
@@ -201,6 +207,11 @@ fi
 if [ -n "$WEAVE_EVAL_NAME" ]; then
     TRACKING_ARGS+=(--weave_eval_name "$WEAVE_EVAL_NAME")
 fi
+case "${KEEP_LOCAL_EVAL_OUTPUTS,,}" in
+    1|true|yes)
+        TRACKING_ARGS+=(--keep_local_eval_outputs)
+        ;;
+esac
 
 python "$EVAL_SCRIPT" \
     --ckpt_dir "$MODEL_PATH" \
@@ -245,4 +256,8 @@ python "$EVAL_SCRIPT" \
     "${TRACKING_ARGS[@]}" \
     $CHUNK_ARGS
 
-echo "Evaluation finished. Results are in $EVALS_PATH"
+if [[ "${KEEP_LOCAL_EVAL_OUTPUTS,,}" =~ ^(1|true|yes)$ ]]; then
+    echo "Evaluation finished. Local scratch was retained at $EVALS_PATH"
+else
+    echo "Evaluation finished. W&B is the source of truth; local scratch may have been cleaned up."
+fi

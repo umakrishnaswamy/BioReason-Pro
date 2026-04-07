@@ -1,5 +1,6 @@
 import json
 import os
+import shlex
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
@@ -19,10 +20,56 @@ def normalize_text(value: Any) -> str:
     return str(value)
 
 
+def resolve_wandb_registry_path(payload: Mapping[str, Any]) -> str:
+    """Return the configured W&B registry reference for an asset or source."""
+    return normalize_text(
+        payload.get("wandb_registry_path")
+        or payload.get("artifact_path")
+    ).strip()
+
+
+def resolve_wandb_registry_url(payload: Mapping[str, Any]) -> str:
+    """Return an optional human-facing W&B registry URL for documentation."""
+    return normalize_text(payload.get("wandb_registry_url")).strip()
+
+
 def load_json(path: str) -> Dict[str, Any]:
     """Load a JSON file from disk."""
     with open(path, "r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def load_exported_env_file(path_value: str, *, override: bool = False) -> Dict[str, str]:
+    """Load KEY=VALUE or export KEY=VALUE lines from a simple env file into os.environ."""
+    loaded: Dict[str, str] = {}
+    env_path = Path(path_value)
+    if not env_path.exists():
+        return loaded
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        if "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        try:
+            parsed_value = shlex.split(value, posix=True)
+            normalized_value = parsed_value[0] if parsed_value else ""
+        except ValueError:
+            normalized_value = value.strip().strip('"').strip("'")
+
+        if override or key not in os.environ:
+            os.environ[key] = normalized_value
+            loaded[key] = normalized_value
+
+    return loaded
 
 
 def expand_placeholders(value: Any) -> Any:
@@ -95,13 +142,15 @@ def load_data_bundle(path_value: str, bundle_name: Optional[str], repo_root: Pat
     bundle["bundle_name"] = resolved_name
     bundle["registry_path"] = registry["_registry_path"]
 
-    for asset_name in ("temporal_split_artifact", "supervised_dataset", "reasoning_dataset"):
+    for asset_name in ("temporal_split_artifact", "reasoning_dataset"):
         asset = dict(bundle.get(asset_name, {}))
         if not asset:
             continue
         local_dir = asset.get("local_dir")
         if local_dir:
             asset["local_dir"] = resolve_repo_path(local_dir, repo_root)
+        asset["wandb_registry_path"] = resolve_wandb_registry_path(asset)
+        asset["wandb_registry_url"] = resolve_wandb_registry_url(asset)
         bundle[asset_name] = asset
 
     return bundle
@@ -154,6 +203,8 @@ def load_eval_target(
             local_path = source_copy.get("local_path")
             if local_path:
                 source_copy["local_path"] = resolve_repo_path(local_path, repo_root)
+            source_copy["wandb_registry_path"] = resolve_wandb_registry_path(source_copy)
+            source_copy["wandb_registry_url"] = resolve_wandb_registry_url(source_copy)
             sources.append(source_copy)
         if sources:
             target[source_list_key] = sources
@@ -161,7 +212,19 @@ def load_eval_target(
     return target
 
 
-def download_wandb_artifact(artifact_path: str, local_dir: str) -> str:
+def get_wandb_artifact_metadata(wandb_registry_path: str) -> Dict[str, Any]:
+    """Fetch W&B artifact metadata without assuming it is already downloaded."""
+    try:
+        import wandb
+    except ImportError as exc:  # pragma: no cover - depends on runtime environment
+        raise RegistryError("wandb is required to inspect registry artifacts.") from exc
+
+    api = wandb.Api()
+    artifact = api.artifact(wandb_registry_path)
+    return dict(getattr(artifact, "metadata", {}) or {})
+
+
+def download_wandb_artifact(wandb_registry_path: str, local_dir: str) -> str:
     """Download a W&B artifact into a deterministic local directory."""
     try:
         import wandb
@@ -170,7 +233,7 @@ def download_wandb_artifact(artifact_path: str, local_dir: str) -> str:
 
     api = wandb.Api()
     ensure_directory(local_dir)
-    artifact = api.artifact(artifact_path)
+    artifact = api.artifact(wandb_registry_path)
     artifact.download(root=local_dir)
     return local_dir
 
@@ -243,27 +306,55 @@ def materialize_source(
         return None
 
     if directory_has_content(local_dir, required_paths):
+        resolved_repo_id = _resolve_repo_id(source)
+        source_ref = normalize_text(
+            resolve_wandb_registry_path(source)
+            or (f"hf://{resolved_repo_id}" if source_type == "huggingface" and resolved_repo_id else "")
+            or source.get("repo_id")
+            or source.get("local_path")
+            or source.get("local_dir")
+        )
         return {
             "source_type": source_type,
             "local_path": local_dir,
-            "source_ref": normalize_text(
-                source.get("artifact_path") or source.get("repo_id") or source.get("local_path")
-            ),
+            "source_ref": source_ref,
             "downloaded": False,
+            "wandb_registry_path": resolve_wandb_registry_path(source),
+            "wandb_registry_url": resolve_wandb_registry_url(source),
         }
 
-    if source_type == "wandb_artifact":
-        artifact_path = normalize_text(source.get("artifact_path")).strip()
-        if not artifact_path:
+    if source_type in {"local_dir", "directory"}:
+        if not local_dir:
             if required:
-                raise RegistryError("wandb_artifact source is missing artifact_path.")
+                raise RegistryError(f"{source_type} source is missing local_dir.")
             return None
-        download_wandb_artifact(artifact_path, local_dir)
+        if directory_has_content(local_dir, required_paths):
+            return {
+                "source_type": source_type,
+                "local_path": local_dir,
+                "source_ref": local_dir,
+                "downloaded": False,
+                "wandb_registry_path": resolve_wandb_registry_path(source),
+                "wandb_registry_url": resolve_wandb_registry_url(source),
+            }
+        if required:
+            raise RegistryError(f"Required local directory does not exist or is incomplete: {local_dir}")
+        return None
+
+    if source_type == "wandb_artifact":
+        wandb_registry_path = resolve_wandb_registry_path(source)
+        if not wandb_registry_path:
+            if required:
+                raise RegistryError("wandb_artifact source is missing wandb_registry_path.")
+            return None
+        download_wandb_artifact(wandb_registry_path, local_dir)
         return {
             "source_type": source_type,
             "local_path": local_dir,
-            "source_ref": artifact_path,
+            "source_ref": wandb_registry_path,
             "downloaded": True,
+            "wandb_registry_path": wandb_registry_path,
+            "wandb_registry_url": resolve_wandb_registry_url(source),
         }
 
     if source_type == "huggingface":
@@ -289,6 +380,8 @@ def materialize_source(
             "local_path": local_dir,
             "source_ref": f"hf://{repo_id}",
             "downloaded": True,
+            "wandb_registry_path": resolve_wandb_registry_path(source),
+            "wandb_registry_url": resolve_wandb_registry_url(source),
         }
 
     if required:
@@ -326,32 +419,48 @@ def materialize_first_available_source(
 def materialize_bundle_asset(asset: Mapping[str, Any]) -> Dict[str, Any]:
     """Download a W&B-backed data asset when needed and return local metadata."""
     local_dir = normalize_text(asset.get("local_dir")).strip()
-    artifact_path = normalize_text(asset.get("artifact_path")).strip()
+    wandb_registry_path = resolve_wandb_registry_path(asset)
     required_paths = list(asset.get("required_paths", []))
+    artifact_metadata: Dict[str, Any] = {}
+
+    if wandb_registry_path:
+        try:
+            artifact_metadata = get_wandb_artifact_metadata(wandb_registry_path)
+        except RegistryError:
+            artifact_metadata = {}
+
+    dataset_source = normalize_text(asset.get("dataset_source") or artifact_metadata.get("dataset_source"))
+    dataset_name = normalize_text(asset.get("dataset_name") or artifact_metadata.get("dataset_name"))
 
     if local_dir and directory_has_content(local_dir, required_paths):
         return {
             "local_dir": local_dir,
-            "artifact_path": artifact_path,
+            "wandb_registry_path": wandb_registry_path,
+            "wandb_registry_url": resolve_wandb_registry_url(asset),
             "downloaded": False,
-            "dataset_source": normalize_text(asset.get("dataset_source")),
-            "dataset_name": normalize_text(asset.get("dataset_name")),
+            "dataset_source": dataset_source,
+            "dataset_name": dataset_name,
+            "artifact_metadata": artifact_metadata,
         }
 
-    if artifact_path and local_dir:
-        download_wandb_artifact(artifact_path, local_dir)
+    if wandb_registry_path and local_dir:
+        download_wandb_artifact(wandb_registry_path, local_dir)
         return {
             "local_dir": local_dir,
-            "artifact_path": artifact_path,
+            "wandb_registry_path": wandb_registry_path,
+            "wandb_registry_url": resolve_wandb_registry_url(asset),
             "downloaded": True,
-            "dataset_source": normalize_text(asset.get("dataset_source")),
-            "dataset_name": normalize_text(asset.get("dataset_name")),
+            "dataset_source": dataset_source,
+            "dataset_name": dataset_name,
+            "artifact_metadata": artifact_metadata,
         }
 
     return {
         "local_dir": local_dir,
-        "artifact_path": artifact_path,
+        "wandb_registry_path": wandb_registry_path,
+        "wandb_registry_url": resolve_wandb_registry_url(asset),
         "downloaded": False,
-        "dataset_source": normalize_text(asset.get("dataset_source")),
-        "dataset_name": normalize_text(asset.get("dataset_name")),
+        "dataset_source": dataset_source,
+        "dataset_name": dataset_name,
+        "artifact_metadata": artifact_metadata,
     }

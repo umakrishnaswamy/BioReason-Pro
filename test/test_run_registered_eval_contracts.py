@@ -77,7 +77,7 @@ class RunRegisteredEvalContractsTest(unittest.TestCase):
             "target_name": "blast-diamond-baseline",
             "prediction_sources": [
                 {
-                    "artifact_path": "demo/project/disease-temporal-blast-diamond-predictions:{benchmark_alias}",
+                    "wandb_registry_path": "demo/project/disease-temporal-blast-diamond-predictions:{benchmark_alias}",
                     "local_dir": "data/artifacts/predictions/blast_diamond/{benchmark_alias_dir}",
                 }
             ],
@@ -86,7 +86,7 @@ class RunRegisteredEvalContractsTest(unittest.TestCase):
         rendered = REGISTERED_EVAL.with_bundle_context(target, bundle)
 
         self.assertEqual(
-            rendered["prediction_sources"][0]["artifact_path"],
+            rendered["prediction_sources"][0]["wandb_registry_path"],
             "demo/project/disease-temporal-blast-diamond-predictions:213.221.225.228",
         )
         self.assertEqual(
@@ -104,9 +104,9 @@ class RunRegisteredEvalContractsTest(unittest.TestCase):
             "train_end_release": 221,
             "dev_end_release": 225,
             "test_end_release": 228,
-            "temporal_split_artifact": {"artifact_path": "demo/project/disease-temporal-split:production"},
+            "temporal_split_artifact": {"wandb_registry_path": "demo/project/disease-temporal-split:production"},
             "reasoning_dataset": {
-                "artifact_path": "demo/project/disease-temporal-reasoning:production",
+                "wandb_registry_path": "demo/project/disease-temporal-reasoning:production",
                 "dataset_source": "wanglab/cafa5",
                 "dataset_name": "disease_temporal_hc_reasoning_v1",
             },
@@ -115,7 +115,7 @@ class RunRegisteredEvalContractsTest(unittest.TestCase):
             "target_name": "bioreason-pro-base",
             "display_name": "bioreason-pro-base",
             "runner": "protein_llm",
-            "model_sources": [{"type": "wandb_artifact", "artifact_path": "demo/project/base:production"}],
+            "model_sources": [{"type": "wandb_artifact", "wandb_registry_path": "demo/project/base:production"}],
         }
         args = types.SimpleNamespace(
             split="validation",
@@ -128,6 +128,7 @@ class RunRegisteredEvalContractsTest(unittest.TestCase):
             max_samples=25,
             num_chunks=1,
             chunk_id=0,
+            keep_local_eval_outputs=False,
         )
         runtime_paths = {
             "output_root": tempfile.mkdtemp(),
@@ -164,24 +165,25 @@ class RunRegisteredEvalContractsTest(unittest.TestCase):
         self.assertEqual(captured["env"]["MODEL_ARTIFACT"], "demo/project/bioreason-pro-base:production")
         self.assertEqual(captured["env"]["EVAL_SPLIT"], "validation")
         self.assertEqual(captured["env"]["WANDB_RUN_NAME"], "eval-bioreason-pro-base-validation-213.221.225.228")
+        self.assertEqual(captured["env"]["KEEP_LOCAL_EVAL_OUTPUTS"], "0")
 
     def test_run_prediction_artifact_target_writes_metrics_and_samples(self):
         bundle = {
             "benchmark_version": "213 -> 221 -> 225 -> 228",
             "benchmark_alias": "213.221.225.228",
             "reasoning_dataset": {
-                "artifact_path": "demo/project/disease-temporal-reasoning:production",
+                "wandb_registry_path": "demo/project/disease-temporal-reasoning:production",
                 "dataset_source": "wanglab/cafa5",
                 "dataset_name": "disease_temporal_hc_reasoning_v1",
             },
-            "temporal_split_artifact": {"artifact_path": "demo/project/disease-temporal-split:production"},
+            "temporal_split_artifact": {"wandb_registry_path": "demo/project/disease-temporal-split:production"},
         }
         target = {
             "target_name": "blast-diamond-baseline",
             "display_name": "blast-diamond-baseline",
             "runner": "prediction_artifact",
             "prediction_glob": "*.tsv",
-            "prediction_sources": [{"type": "wandb_artifact", "artifact_path": "demo/project/preds:latest"}],
+            "prediction_sources": [{"type": "wandb_artifact", "wandb_registry_path": "demo/project/preds:latest"}],
         }
         args = types.SimpleNamespace(
             split="test",
@@ -190,6 +192,7 @@ class RunRegisteredEvalContractsTest(unittest.TestCase):
             wandb_project=None,
             wandb_entity=None,
             wandb_mode=None,
+            keep_local_eval_outputs=True,
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -255,6 +258,90 @@ class RunRegisteredEvalContractsTest(unittest.TestCase):
             self.assertTrue((results_dir / "run_summary.json").exists())
             summary = json.loads((results_dir / "run_summary.json").read_text(encoding="utf-8"))
             self.assertEqual(summary["prediction_source"], "demo/project/preds:latest")
+
+    def test_run_prediction_artifact_target_cleans_local_scratch_after_wandb_logging(self):
+        bundle = {
+            "benchmark_version": "213 -> 221 -> 225 -> 228",
+            "benchmark_alias": "213.221.225.228",
+            "reasoning_dataset": {
+                "wandb_registry_path": "demo/project/disease-temporal-reasoning:production",
+                "dataset_source": "wanglab/cafa5",
+                "dataset_name": "disease_temporal_hc_reasoning_v1",
+            },
+            "temporal_split_artifact": {"wandb_registry_path": "demo/project/disease-temporal-split:production"},
+        }
+        target = {
+            "target_name": "blast-diamond-baseline",
+            "display_name": "blast-diamond-baseline",
+            "runner": "prediction_artifact",
+            "prediction_glob": "*.tsv",
+            "prediction_sources": [{"type": "wandb_artifact", "wandb_registry_path": "demo/project/preds:latest"}],
+        }
+        args = types.SimpleNamespace(
+            split="test",
+            metric_threads=2,
+            metric_threshold_step=0.95,
+            wandb_project="demo-project",
+            wandb_entity="demo-entity",
+            wandb_mode="online",
+            keep_local_eval_outputs=False,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_root = Path(tmpdir) / "eval"
+            prediction_dir = Path(tmpdir) / "predictions"
+            prediction_dir.mkdir(parents=True, exist_ok=True)
+            (prediction_dir / "predictions.tsv").write_text("P1\tGO:0001111\t1.0\n", encoding="utf-8")
+
+            runtime_paths = {
+                "output_root": str(output_root),
+                "go_obo_path": "/tmp/go-basic.obo",
+                "ia_file_path": "/tmp/IA.txt",
+                "dataset_cache_dir": "/tmp/hf-cache",
+                "go_embeddings_path": "/tmp/go-embeddings",
+                "structure_dir": "/tmp/structures",
+            }
+
+            fake_evals_module = types.ModuleType("evals")
+            fake_cafa_module = types.SimpleNamespace(
+                run_cafa_evaluation=lambda *args, **kwargs: ("evaluation_df", {"f": object()}),
+                extract_metrics_summary=lambda result: {
+                    "molecular_function_f1": 0.5,
+                    "biological_process_f1": 0.6,
+                    "cellular_component_f1": 0.7,
+                    "overall_mean_f1": 0.6,
+                },
+                normalize_metrics_for_logging=lambda metrics: {
+                    **metrics,
+                    "fmax_mf": metrics["molecular_function_f1"],
+                    "fmax_bp": metrics["biological_process_f1"],
+                    "fmax_cc": metrics["cellular_component_f1"],
+                    "overall_mean_fmax": metrics["overall_mean_f1"],
+                },
+                write_metrics_summary=lambda metrics, output_dir: str(Path(output_dir) / "metrics_summary.json"),
+            )
+            fake_evals_module.cafa_evals = fake_cafa_module
+
+            with mock.patch.object(
+                REGISTERED_EVAL,
+                "materialize_first_available_source",
+                return_value={"local_path": str(prediction_dir), "source_ref": "demo/project/preds:latest"},
+            ), mock.patch.object(
+                REGISTERED_EVAL,
+                "load_ground_truth_split",
+                return_value=[{"protein_id": "P1", "ground_truth_terms": {"GO:0001111"}}],
+            ), mock.patch.object(
+                REGISTERED_EVAL,
+                "maybe_log_prediction_eval_to_wandb",
+                return_value="eval-artifact:v0",
+            ), mock.patch.dict(
+                sys.modules,
+                {"evals": fake_evals_module},
+            ):
+                status = REGISTERED_EVAL.run_prediction_artifact_target(args, bundle, target, runtime_paths)
+
+            self.assertEqual(status["status"], "completed")
+            self.assertFalse((output_root / "blast-diamond-baseline" / "test").exists())
 
 
 if __name__ == "__main__":

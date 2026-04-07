@@ -14,21 +14,15 @@
         "test_end": 228
       },
       "temporal_split_artifact": {
-        "artifact_path": "${WANDB_ENTITY}/${WANDB_PROJECT}/disease-temporal-split:production",
+        "wandb_registry_path": "${BIOREASON_MAIN_TEMPORAL_SPLIT_REGISTRY_PATH}",
         "local_dir": "data/artifacts/benchmarks/213_221_225_228/temporal_split",
         "required_paths": [
           "summary.json",
           "report.md"
         ]
       },
-      "supervised_dataset": {
-        "artifact_path": "${WANDB_ENTITY}/${WANDB_PROJECT}/disease-temporal-supervised:production",
-        "local_dir": "data/artifacts/datasets/disease_temporal_hc_v1/213_221_225_228",
-        "dataset_source": "wanglab/cafa5",
-        "dataset_name": "disease_temporal_hc_v1"
-      },
       "reasoning_dataset": {
-        "artifact_path": "${WANDB_ENTITY}/${WANDB_PROJECT}/disease-temporal-reasoning:production",
+        "wandb_registry_path": "${BIOREASON_MAIN_REASONING_DATASET_REGISTRY_PATH}",
         "local_dir": "data/artifacts/datasets/disease_temporal_hc_reasoning_v1/213_221_225_228",
         "dataset_source": "wanglab/cafa5",
         "dataset_name": "disease_temporal_hc_reasoning_v1"
@@ -47,21 +41,15 @@
         "test_end": 228
       },
       "temporal_split_artifact": {
-        "artifact_path": "${WANDB_ENTITY}/${WANDB_PROJECT}/disease-temporal-split:214.221.225.228",
+        "wandb_registry_path": "${BIOREASON_COMPARISON_TEMPORAL_SPLIT_REGISTRY_PATH}",
         "local_dir": "data/artifacts/benchmarks/214_221_225_228/temporal_split",
         "required_paths": [
           "summary.json",
           "report.md"
         ]
       },
-      "supervised_dataset": {
-        "artifact_path": "${WANDB_ENTITY}/${WANDB_PROJECT}/disease-temporal-supervised:214.221.225.228",
-        "local_dir": "data/artifacts/datasets/disease_temporal_hc_v1/214_221_225_228",
-        "dataset_source": "wanglab/cafa5",
-        "dataset_name": "disease_temporal_hc_v1"
-      },
       "reasoning_dataset": {
-        "artifact_path": "${WANDB_ENTITY}/${WANDB_PROJECT}/disease-temporal-reasoning:214.221.225.228",
+        "wandb_registry_path": "${BIOREASON_COMPARISON_REASONING_DATASET_REGISTRY_PATH}",
         "local_dir": "data/artifacts/datasets/disease_temporal_hc_reasoning_v1/214_221_225_228",
         "dataset_source": "wanglab/cafa5",
         "dataset_name": "disease_temporal_hc_reasoning_v1"

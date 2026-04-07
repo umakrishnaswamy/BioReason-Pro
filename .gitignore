@@ -16,6 +16,8 @@ wandb/
 .vscode/
 .venv/
 .env
+configs/disease_benchmark/wandb_registry_paths.env
+configs/disease_benchmark/wandb_asset_sources.env
 .pytest_cache/
 
 # C extensions

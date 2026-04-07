@@ -39,12 +39,11 @@ data/artifacts/
 │   └── 214_221_225_228/
 │       └── temporal_split/
 ├── datasets/
-│   ├── disease_temporal_hc_v1/
-│   │   └── 213_221_225_228/
 │   └── disease_temporal_hc_reasoning_v1/
-│       └── 213_221_225_228/
+│       ├── 213_221_225_228/
+│       └── 214_221_225_228/
 └── eval/
-    └── ...
+    └── ...   # eval の一時 scratch。W&B upload 成功後は既定で cleanup する
 ```
 
 ### 0.3 W&B Artifact の family, alias, URL
@@ -53,9 +52,8 @@ Artifact family は variant 名を family 名に埋め込まず、同じ family 
 
 | 用途 | Artifact family | 主 alias | 補助 alias | URL |
 |---|---|---|---|---|
-| Temporal split artifact | `disease-temporal-split` | `213.221.225.228`, `production` | `214.221.225.228` | `https://wandb.ai/<entity>/<project>/artifacts/dataset/disease-temporal-split` |
-| Supervised dataset | `disease-temporal-supervised` | `213.221.225.228`, `production` | `214.221.225.228` | `https://wandb.ai/<entity>/<project>/artifacts/dataset/disease-temporal-supervised` |
-| Reasoning dataset | `disease-temporal-reasoning` | `213.221.225.228`, `production` | `214.221.225.228` | `https://wandb.ai/<entity>/<project>/artifacts/dataset/disease-temporal-reasoning` |
+| Temporal split artifact | `disease-temporal-split` | `213.221.225.228`, `production` | `214.221.225.228` | `https://wandb.ai/wandb-healthcare/bioreason-pro-custom/artifacts/dataset/disease-temporal-split` |
+| Reasoning dataset | `disease-temporal-reasoning` | `213.221.225.228`, `production` | `214.221.225.228` | `https://wandb.ai/wandb-healthcare/bioreason-pro-custom/artifacts/dataset/disease-temporal-reasoning` |
 
 運用ルール:
 
@@ -64,23 +62,60 @@ Artifact family は variant 名を family 名に埋め込まず、同じ family 
 - `214.221.225.228` は comparison variant 用 alias として使う
 - comparison variant には `production` を付けない
 
-### 0.4 registry files
+公開 model artifact の現状:
 
-CoreWeave 側の実行では、毎回 local directory を手で書くのではなく、repo 管理された registry を使う。
+| 用途 | Artifact family | 主 alias | URL |
+|---|---|---|---|
+| BioReason-Pro SFT | `bioreason-pro-sft` | `production`, `213.221.225.228` | `https://wandb.ai/wandb-healthcare/bioreason-pro-custom/artifacts/model/bioreason-pro-sft` |
+| BioReason-Pro RL | `bioreason-pro-rl` | `production`, `213.221.225.228` | `https://wandb.ai/wandb-healthcare/bioreason-pro-custom/artifacts/model/bioreason-pro-rl` |
 
-使う registry は次で固定する。
+`BioReason-Pro base`, `BLAST / Diamond`, `ESM 系単体` は source dir が埋まってから publish する。
 
-- data bundle registry: [data_registry.json](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/configs/disease_benchmark/data_registry.json)
-- evaluation target registry: [eval_target_registry.json](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/configs/disease_benchmark/eval_target_registry.json)
+### 0.4 W&B Registry path manifest
 
-使い分け:
+ここでいう `registry` は **W&B Registry** のことである。  
+repo 内の JSON は registry そのものではなく、**ユーザーが W&B Registry path を貼る manifest** として扱う。
 
-- data bundle registry: benchmark version, temporal split artifact, supervised dataset artifact, reasoning dataset artifact を引く
-- evaluation target registry: `base-family`, `tuned-family`, `spec-comparison` の target group と、各 model / prediction artifact の source を引く
+使う manifest は次で固定する。
 
-公開 checkpoint は registry から Hugging Face source を見て自動取得する。  
-private / internal checkpoint は registry から W&B model artifact を見て取得する。  
-`bioreason-pro-base` は、必要なら `BIOREASON_PRO_BASE_HF_REPO` を設定して Hugging Face source を優先できる。
+- data-bundle manifest: [data_registry.json](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/configs/disease_benchmark/data_registry.json)
+- evaluation-target manifest: [eval_target_registry.json](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/configs/disease_benchmark/eval_target_registry.json)
+- asset publish manifest: [artifact_publish_registry.json](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/configs/disease_benchmark/artifact_publish_registry.json)
+- path を貼る env template: [wandb_registry_paths.env.example](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/configs/disease_benchmark/wandb_registry_paths.env.example)
+- 実際に path を入れた local env file: [wandb_registry_paths.env](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/configs/disease_benchmark/wandb_registry_paths.env)
+- source を貼る env template: [wandb_asset_sources.env.example](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/configs/disease_benchmark/wandb_asset_sources.env.example)
+
+役割は次のとおりである。
+
+- env file: temporal split artifact, dataset, prediction baseline, model の **W&B Registry path** を貼る
+- source env file: public Hugging Face repo ID、private checkpoint の local dir、baseline prediction dir を貼る
+- data-bundle manifest: benchmark version と、どの dataset registry path を使うかを束ねる
+- evaluation-target manifest: `base-family`, `tuned-family`, `spec-comparison` の target group と、各 model / prediction source を束ねる
+
+ここで貼る path は、browser URL ではなく `entity/project/artifact_name:alias` 形式の **W&B Registry ref** を使う。
+
+現時点で [wandb_registry_paths.env](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/configs/disease_benchmark/wandb_registry_paths.env) に貼ってある ref は次である。
+
+| env var | 用途 | 現在の W&B Registry ref |
+|---|---|---|
+| `BIOREASON_MAIN_TEMPORAL_SPLIT_REGISTRY_PATH` | 213-start main variant の temporal split artifact | `wandb-healthcare/bioreason-pro-custom/disease-temporal-split:production` |
+| `BIOREASON_MAIN_REASONING_DATASET_REGISTRY_PATH` | 213-start main variant の reasoning dataset | `wandb-healthcare/bioreason-pro-custom/disease-temporal-reasoning:production` |
+| `BIOREASON_COMPARISON_TEMPORAL_SPLIT_REGISTRY_PATH` | 214-start comparison variant の temporal split artifact | `wandb-healthcare/bioreason-pro-custom/disease-temporal-split:214.221.225.228` |
+| `BIOREASON_COMPARISON_REASONING_DATASET_REGISTRY_PATH` | 214-start comparison variant の reasoning dataset | `wandb-healthcare/bioreason-pro-custom/disease-temporal-reasoning:214.221.225.228` |
+| `BIOREASON_SFT_MODEL_REGISTRY_PATH` | SFT model artifact | `wandb-healthcare/bioreason-pro-custom/bioreason-pro-sft:production` |
+| `BIOREASON_RL_MODEL_REGISTRY_PATH` | RL model artifact | `wandb-healthcare/bioreason-pro-custom/bioreason-pro-rl:production` |
+
+未設定の ref は次である。
+
+| env var | 用途 | 状態 |
+|---|---|---|
+| `BIOREASON_BASE_MODEL_REGISTRY_PATH` | base model artifact | 未設定 |
+| `BIOREASON_BLAST_DIAMOND_PRED_REGISTRY_PATH` | BLAST / Diamond baseline prediction artifact | 未設定 |
+| `BIOREASON_ESM_STANDALONE_PRED_REGISTRY_PATH` | ESM standalone baseline prediction artifact | 未設定 |
+
+公開 checkpoint は、まず一度 Hugging Face から materialize し、その後 **W&B model artifact に publish** して使う。  
+private / internal checkpoint と dataset は、**貼り付けた W&B Registry path** から取得する。  
+downstream の eval / SFT / RL は、source dir や HF repo ではなく **W&B Registry ref** を正本として解決する。
 
 ## 1. データの準備
 
@@ -107,11 +142,12 @@ uv pip install -r requirements/uv-local-data.txt
 
 local storage preparation、temporal split build、sanity check、W&B upload は、次の 1 本のコマンドでまとめて回す。
 
-まず entity と project を決める。
+まず `.env` を読み込む。
 
 ```bash
-export WANDB_ENTITY="<your-entity>"
-export WANDB_PROJECT="bioreason-pro-disease-benchmark"
+set -a
+source .env
+set +a
 ```
 
 main variant と comparison variant をまとめて回す。
@@ -148,8 +184,8 @@ uv run --active python scripts/run_temporal_split_artifact_pipeline.py \
 4. sanity check が通った場合だけ W&B artifact upload に進む
 5. 実行結果を `pipeline_status.json` に保存する
 
-dataset directory に中身が既にある場合は、temporal split artifact に加えて dataset artifact も同じ run で upload する。  
-dataset directory が無い、または空である場合は、temporal split artifact だけを upload する。
+reasoning dataset directory に中身が既にある場合は、temporal split artifact に加えて reasoning dataset artifact も同じ run で upload する。  
+reasoning dataset directory が無い、または空である場合は、temporal split artifact だけを upload する。
 
 sanity check で見ている項目は次である。
 
@@ -224,7 +260,7 @@ rsync -av --delete \
 ```
 
 `data/artifacts` はローカル生成物なので、この `rsync` には含めない。  
-benchmark / dataset / prediction baseline は、CoreWeave 側で **W&B Artifact reference を registry 経由で解決**する。
+benchmark / dataset / prediction baseline は、CoreWeave 側で **W&B Registry path を manifest 経由で解決**する。
 
 ### 2.3 CoreWeave 上で uv 環境を作る
 
@@ -243,26 +279,102 @@ uv pip install unsloth
 uv run --active wandb login
 ```
 
-### 2.4 1 回だけ設定する環境変数
+### 2.4 1 回だけ env file を作る
 
-model path や dataset directory は毎回コマンドに書かず、環境変数と registry で解決する。
+model path や dataset directory は毎回コマンドに書かず、**W&B Registry path** と source env file で解決する。
 
 ```bash
-export WANDB_ENTITY="<your-entity>"
-export WANDB_PROJECT="bioreason-pro-disease-benchmark"
+set -a
+source .env
+set +a
+
+cp configs/disease_benchmark/wandb_registry_paths.env.example \
+  configs/disease_benchmark/wandb_registry_paths.env
+
+cp configs/disease_benchmark/wandb_asset_sources.env.example \
+  configs/disease_benchmark/wandb_asset_sources.env
+
+# temporal split / dataset / published model artifact の W&B Registry path をここに貼る
+$EDITOR configs/disease_benchmark/wandb_registry_paths.env
+
+# model / baseline prediction の source をここに貼る
+$EDITOR configs/disease_benchmark/wandb_asset_sources.env
 
 export BIOREASON_GO_EMBEDDINGS_PATH="/path/to/go-embeddings"
 export BIOREASON_IA_FILE_PATH="/path/to/IA.txt"
 export BIOREASON_STRUCTURE_DIR="$HOME/BioReason-Pro/data/structures"
 export BIOREASON_DATASET_CACHE_DIR="$HOME/BioReason-Pro/data/artifacts/hf_cache"
-
-# base checkpoint を Hugging Face source から優先したい場合だけ設定する
-export BIOREASON_PRO_BASE_HF_REPO="<optional-hf-repo-id>"
 ```
 
 `GO_OBO_PATH` は repo 内の `bioreason2/dataset/go-basic.obo` を既定で使うので、通常は設定不要である。
+`WANDB_PROJECT` は run の記録先であり、dataset / model の取得元は `wandb_registry_paths.env` に書いた W&B Registry ref が source-of-truth になる。
+`register_research_assets.py` は `wandb_asset_sources.env` を、`run_registered_eval.py` と `sh_train_protein_qwen_staged.sh` は `wandb_registry_paths.env` を既定で自動読込する。
 
-### 2.5 srun の基本形
+### 2.5 model / baseline artifact を一度 publish する
+
+比較対象は、**source から直接読むのではなく、最初に W&B Artifact に固定してから使う**。
+
+固定ルール:
+
+- `BioReason-Pro SFT` と `BioReason-Pro RL` は public Hugging Face source から一度 download し、W&B model artifact に publish する
+- `BioReason-Pro base` は public source が固定されていないので、private checkpoint または local checkpoint dir を source にして publish する
+- `BLAST / Diamond` と `ESM 系単体` は checkpoint ではなく **prediction artifact** として publish する
+- publish が成功すると `configs/disease_benchmark/wandb_registry_paths.env` が自動更新される
+
+まず public model を publish する。
+
+```bash
+cd ~/BioReason-Pro
+source .venv-gpu/bin/activate
+
+uv run --active python scripts/register_research_assets.py \
+  --asset bioreason-pro-sft \
+  --wandb-entity "$WANDB_ENTITY" \
+  --wandb-project "$WANDB_PROJECT"
+
+uv run --active python scripts/register_research_assets.py \
+  --asset bioreason-pro-rl \
+  --wandb-entity "$WANDB_ENTITY" \
+  --wandb-project "$WANDB_PROJECT"
+```
+
+`BioReason-Pro base` は source を埋めたあとに publish する。
+
+```bash
+cd ~/BioReason-Pro
+source .venv-gpu/bin/activate
+
+uv run --active python scripts/register_research_assets.py \
+  --asset bioreason-pro-base \
+  --wandb-entity "$WANDB_ENTITY" \
+  --wandb-project "$WANDB_PROJECT"
+```
+
+baseline prediction artifact も、prediction dir を埋めたあとに publish する。
+
+```bash
+cd ~/BioReason-Pro
+source .venv-gpu/bin/activate
+
+uv run --active python scripts/register_research_assets.py \
+  --asset blast-diamond-baseline \
+  --wandb-entity "$WANDB_ENTITY" \
+  --wandb-project "$WANDB_PROJECT"
+
+uv run --active python scripts/register_research_assets.py \
+  --asset esm-standalone-baseline \
+  --wandb-entity "$WANDB_ENTITY" \
+  --wandb-project "$WANDB_PROJECT"
+```
+
+補足:
+
+- `configs/disease_benchmark/wandb_asset_sources.env` に `BIOREASON_PRO_SFT_HF_REPO="wanglab/bioreason-pro-sft"` と `BIOREASON_PRO_RL_HF_REPO="wanglab/bioreason-pro-rl"` を入れておけば、public model は自動で materialize される
+- `BIOREASON_PRO_BASE_HF_REPO` は空のままでよい。base は current README では public HF source を固定しない
+- `BLAST / Diamond` と `ESM 系単体` は予測 TSV 群を置いた directory を source にする
+- 現在 publish 済みの registry ref は `wandb-healthcare/bioreason-pro-custom/bioreason-pro-sft:production` と `wandb-healthcare/bioreason-pro-custom/bioreason-pro-rl:production` である
+
+### 2.6 srun の基本形
 
 実際の partition 名や account 名は自分の環境に合わせて置き換える。  
 以後の評価・学習コマンドは、すべてこの形で login node から送る。
@@ -293,10 +405,10 @@ srun \
 
 - `BLAST / Diamond`: prediction artifact として評価する
 - `ESM 系単体`: prediction artifact として評価する
-- `BioReason-Pro base`: registry から checkpoint source を解決して評価する
-- `tuned model`: `bioreason-pro-sft`, `bioreason-pro-rl` を registry から解決して評価する
+- `BioReason-Pro base`: W&B Registry path を解決して評価する
+- `tuned model`: `bioreason-pro-sft`, `bioreason-pro-rl` を W&B Registry path に従って評価する
 
-registry 上の target group は次を使う。
+manifest 上の target group は次を使う。
 
 - `base-family`: `blast-diamond-baseline`, `esm-standalone-baseline`, `bioreason-pro-base`
 - `tuned-family`: `bioreason-pro-sft`, `bioreason-pro-rl`
@@ -328,11 +440,12 @@ srun \
 
 この command は target ごとに次を自動で行う。
 
-1. data bundle registry から `temporal split artifact` と dataset artifact reference を解決する
-2. evaluation target registry から model source または prediction artifact source を解決する
-3. public checkpoint は Hugging Face から、internal checkpoint は W&B artifact から取得する
+1. data-bundle manifest から `temporal split artifact` と dataset の W&B Registry path を解決する
+2. evaluation-target manifest から model source または prediction artifact source を解決する
+3. data / model / prediction artifact は `wandb_registry_paths.env` に書いた W&B Registry ref から取得する
 4. prediction artifact baseline は CAFA metric 経路で `F_max` を計算する
 5. W&B に metric / summary table / sample table / result artifact を保存する
+6. local eval scratch は debug 用に `--keep-local-eval-outputs` を付けない限り保持しない
 
 ### 3.3 個別 target を評価する
 
@@ -433,11 +546,11 @@ srun \
 F_max は **各 eval run の中で自動計算され、そのまま W&B に保存される**。  
 別ステップで `evals/cafa_evals.py` を手で回す想定ではない。
 
-確認先は次の 3 つ。
+確認先は W&B を正本とする。
 
 - W&B run page
-- `data/artifacts/eval/<target>/<split>/results/cafa_metrics/metrics_summary.json`
-- `data/artifacts/eval/suite_summary.json`
+- W&B artifact page
+- Weave evaluation page
 
 W&B では少なくとも次が見えていることを確認する。
 
@@ -448,12 +561,8 @@ W&B では少なくとも次が見えていることを確認する。
 - `eval_summary` table
 - `eval_samples` table
 
-ローカル出力としては、各 eval run の中で自動的に次が作られる。
-
-- `data/artifacts/eval/<target>/<split>/results/*.json`
-- `data/artifacts/eval/<target>/<split>/results/sample_results.tsv`
-- `data/artifacts/eval/<target>/<split>/results/run_summary.json`
-- `data/artifacts/eval/<target>/<split>/results/cafa_metrics/metrics_summary.json`
+既定では、eval の JSON / TSV / metric export は **W&B artifact に保存されたあと local から cleanup される**。  
+ローカルに残して目視確認したいときだけ、`scripts/run_registered_eval.py` に `--keep-local-eval-outputs` を付ける。
 
 ## 4. SFT
 
@@ -465,20 +574,23 @@ W&B では少なくとも次が見えていることを確認する。
 毎回 arbitrary な path を書くのではなく、次だけを確認する。
 
 - `WANDB_ENTITY`
+- `configs/disease_benchmark/wandb_registry_paths.env`
 - `BIOREASON_GO_EMBEDDINGS_PATH`
 - `BIOREASON_STRUCTURE_DIR`
 - `BIOREASON_DATASET_CACHE_DIR`
 - `BASE_CHECKPOINT_DIR`
-- `BASE_CHECKPOINT`
 
 既定値は次のとおりで、スペシフィケーション側に寄せてある。
 
 - `BASE_CHECKPOINT_DIR="data/artifacts/models/bioreason_pro_base"`
-- `TEMPORAL_SPLIT_ARTIFACT="disease-temporal-split:production"`
-- `DATASET_ARTIFACT="disease-temporal-reasoning:production"`
+- `TEMPORAL_SPLIT_ARTIFACT="$BIOREASON_MAIN_TEMPORAL_SPLIT_REGISTRY_PATH"`
+- `DATASET_ARTIFACT="$BIOREASON_MAIN_REASONING_DATASET_REGISTRY_PATH"`
+- `BASE_CHECKPOINT="$BIOREASON_BASE_MODEL_REGISTRY_PATH"`
 - `CAFA5_DATASET="wanglab/cafa5"`
 - `STAGE1_DATASET_NAME="disease_temporal_hc_reasoning_v1"`
 - `STAGE2_DATASET_NAME="disease_temporal_hc_reasoning_v1"`
+
+SFT wrapper は、`BIOREASON_BASE_MODEL_REGISTRY_PATH` を見て base model artifact を local に materialize し、前半フェーズと後半フェーズの両方でその重みを初期値として使う。
 
 ### 4.2 実行コマンド
 
@@ -548,8 +660,9 @@ RL 実装が入ったら、README には次を追加する。
 1. ローカル Mac で `uv` 環境を作る
 2. `scripts/run_temporal_split_artifact_pipeline.py` を 1 回実行する
 3. CoreWeave に repo を送る
-4. CoreWeave 上で `uv` 環境を作り、`WANDB_*` と `BIOREASON_*` の環境変数を設定する
-5. `base-family` を `validation` で評価する
-6. SFT を回す
-7. `tuned-family` を `test` で評価する
-8. RL entry point が入ったら RL に進む
+4. CoreWeave 上で `uv` 環境を作り、`WANDB_*`, `wandb_registry_paths.env`, `wandb_asset_sources.env` を用意する
+5. public model と private baseline source を一度 W&B artifact に publish する
+6. `base-family` を `validation` で評価する
+7. SFT を回す
+8. `tuned-family` を `test` で評価する
+9. RL entry point が入ったら RL に進む

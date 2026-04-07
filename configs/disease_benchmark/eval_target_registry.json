@@ -26,7 +26,7 @@
       "prediction_sources": [
         {
           "type": "wandb_artifact",
-          "artifact_path": "${WANDB_ENTITY}/${WANDB_PROJECT}/disease-temporal-blast-diamond-predictions:{benchmark_alias}",
+          "wandb_registry_path": "${BIOREASON_BLAST_DIAMOND_PRED_REGISTRY_PATH}",
           "local_dir": "data/artifacts/predictions/blast_diamond/{benchmark_alias_dir}"
         }
       ]
@@ -39,7 +39,7 @@
       "prediction_sources": [
         {
           "type": "wandb_artifact",
-          "artifact_path": "${WANDB_ENTITY}/${WANDB_PROJECT}/disease-temporal-esm-standalone-predictions:{benchmark_alias}",
+          "wandb_registry_path": "${BIOREASON_ESM_STANDALONE_PRED_REGISTRY_PATH}",
           "local_dir": "data/artifacts/predictions/esm_standalone/{benchmark_alias_dir}"
         }
       ]
@@ -49,16 +49,8 @@
       "runner": "protein_llm",
       "model_sources": [
         {
-          "type": "huggingface",
-          "repo_id_env": "BIOREASON_PRO_BASE_HF_REPO",
-          "local_dir": "data/artifacts/models/bioreason_pro_base",
-          "required_paths": [
-            "config.json"
-          ]
-        },
-        {
           "type": "wandb_artifact",
-          "artifact_path": "${WANDB_ENTITY}/${WANDB_PROJECT}/bioreason-pro-base:production",
+          "wandb_registry_path": "${BIOREASON_BASE_MODEL_REGISTRY_PATH}",
           "local_dir": "data/artifacts/models/bioreason_pro_base",
           "required_paths": [
             "config.json"
@@ -72,16 +64,8 @@
       "optional": true,
       "model_sources": [
         {
-          "type": "huggingface",
-          "repo_id": "wanglab/bioreason-pro-sft",
-          "local_dir": "data/artifacts/models/bioreason_pro_sft",
-          "required_paths": [
-            "config.json"
-          ]
-        },
-        {
           "type": "wandb_artifact",
-          "artifact_path": "${WANDB_ENTITY}/${WANDB_PROJECT}/bioreason-pro-sft:production",
+          "wandb_registry_path": "${BIOREASON_SFT_MODEL_REGISTRY_PATH}",
           "local_dir": "data/artifacts/models/bioreason_pro_sft",
           "required_paths": [
             "config.json"
@@ -95,16 +79,8 @@
       "optional": true,
       "model_sources": [
         {
-          "type": "huggingface",
-          "repo_id": "wanglab/bioreason-pro-rl",
-          "local_dir": "data/artifacts/models/bioreason_pro_rl",
-          "required_paths": [
-            "config.json"
-          ]
-        },
-        {
           "type": "wandb_artifact",
-          "artifact_path": "${WANDB_ENTITY}/${WANDB_PROJECT}/bioreason-pro-rl:production",
+          "wandb_registry_path": "${BIOREASON_RL_MODEL_REGISTRY_PATH}",
           "local_dir": "data/artifacts/models/bioreason_pro_rl",
           "required_paths": [
             "config.json"

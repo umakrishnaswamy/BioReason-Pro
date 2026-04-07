@@ -81,10 +81,16 @@ def build_training_tracking_config(args: Any, run_name: str, job_type: Optional[
     """Build the common W&B config required by the disease benchmark spec."""
     resolved_job_type = job_type or _get_arg(args, "wandb_job_type", "train_sft")
     temporal_split_artifact = first_non_empty(_get_arg(args, "temporal_split_artifact"))
-    dataset_config = first_non_empty(_get_arg(args, "dataset_config"), _get_arg(args, "cafa5_dataset_name"))
+    dataset_config = first_non_empty(
+        _get_arg(args, "dataset_config"),
+        _get_arg(args, "reasoning_dataset_config"),
+        _get_arg(args, "reasoning_dataset_name"),
+        _get_arg(args, "cafa5_dataset_name"),
+    )
     reasoning_dataset_config = first_non_empty(
         _get_arg(args, "reasoning_dataset_config"),
         _get_arg(args, "reasoning_dataset_name"),
+        dataset_config,
     )
     output_model_artifact = first_non_empty(
         _get_arg(args, "model_artifact"),

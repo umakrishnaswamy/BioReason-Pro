@@ -177,8 +177,10 @@ class ProteinLLMFineTuner(pl.LightningModule):
             use_unsloth=self.use_unsloth,
         )
 
-        # Load projector weights if provided (for stage 2)
-        if self.training_stage == 2 and self.projector_checkpoint_path and not self.hparams.ckpt_path:
+        # Initialize projector / GO modules from a prior checkpoint when provided.
+        # This applies to both stage 1 warm-starts and stage 2 continuation, unless
+        # Lightning is already restoring the full module state from ckpt_path.
+        if self.projector_checkpoint_path and not self.hparams.ckpt_path:
             print(f"Loading projector weights from: {self.projector_checkpoint_path}")
             projector_state_dict = torch.load(self.projector_checkpoint_path, map_location=self.device)
             self.model.protein_projection.load_state_dict(projector_state_dict)

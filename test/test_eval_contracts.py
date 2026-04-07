@@ -279,9 +279,11 @@ def make_eval_args(**overrides):
         wandb_entity=None,
         wandb_run_name=None,
         wandb_artifact_name=None,
+        wandb_dir=None,
         wandb_mode=None,
         weave_project=None,
         weave_eval_name=None,
+        keep_local_eval_outputs=False,
     )
     base.update(overrides)
     return argparse.Namespace(**base)
@@ -621,7 +623,7 @@ class EvalContractTests(unittest.TestCase):
                 eval_split="test",
                 evals_path=tmpdir,
                 metrics_summary_path=str(metrics_path),
-                benchmark_version="disease_temporal_hc_v1",
+                benchmark_version="disease_temporal_hc_reasoning_v1",
                 model_name="BioReason-Pro-SFT",
                 wandb_project="bioreason-pro",
                 wandb_entity="demo-entity",
@@ -640,7 +642,7 @@ class EvalContractTests(unittest.TestCase):
         self.assertIn("exact_match=True", sample_rows[0]["accuracy_or_match_note"])
 
         self.assertEqual(EVAL.wandb.init_calls[0]["job_type"], "eval")
-        self.assertEqual(EVAL.wandb.init_calls[0]["config"]["benchmark_version"], "disease_temporal_hc_v1")
+        self.assertEqual(EVAL.wandb.init_calls[0]["config"]["benchmark_version"], "disease_temporal_hc_reasoning_v1")
         self.assertTrue(EVAL.wandb.last_run.finished)
         self.assertEqual(EVAL.wandb.last_run.artifacts[0].added_dirs, [tmpdir])
         self.assertTrue(any("fmax_mf" in payload for payload in EVAL.wandb.logged_payloads))
@@ -650,6 +652,40 @@ class EvalContractTests(unittest.TestCase):
         self.assertEqual(EVAL.weave.init_calls[0], "demo-entity/bioreason-pro")
         self.assertEqual(len(EVAL.weave.Evaluation.instances), 1)
         self.assertEqual(len(EVAL.weave.Evaluation.instances[0].dataset), 1)
+
+    def test_maybe_cleanup_local_eval_outputs_removes_scratch_after_wandb_logging(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scratch_dir = Path(tmpdir) / "results"
+            scratch_dir.mkdir()
+            (scratch_dir / "sample.json").write_text("{}", encoding="utf-8")
+
+            args = make_eval_args(
+                evals_path=str(scratch_dir),
+                wandb_project="bioreason-pro",
+                wandb_mode="online",
+                keep_local_eval_outputs=False,
+            )
+            status = EVAL.maybe_cleanup_local_eval_outputs(args, {"wandb_logged": True})
+
+            self.assertTrue(status["cleanup_completed"])
+            self.assertFalse(scratch_dir.exists())
+
+    def test_maybe_cleanup_local_eval_outputs_keeps_scratch_in_offline_mode(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scratch_dir = Path(tmpdir) / "results"
+            scratch_dir.mkdir()
+            (scratch_dir / "sample.json").write_text("{}", encoding="utf-8")
+
+            args = make_eval_args(
+                evals_path=str(scratch_dir),
+                wandb_project="bioreason-pro",
+                wandb_mode="offline",
+                keep_local_eval_outputs=False,
+            )
+            status = EVAL.maybe_cleanup_local_eval_outputs(args, {"wandb_logged": True})
+
+            self.assertFalse(status["cleanup_completed"])
+            self.assertTrue(scratch_dir.exists())
 
 
 if __name__ == "__main__":
