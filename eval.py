@@ -220,9 +220,27 @@ def load_dataset(args):
         debug=args.debug,
     )
     eval_ds = select_eval_dataset(train_ds, val_ds, test_ds, args.eval_split)
-    eval_ds = eval_ds.shuffle(seed=args.seed)
+    if args.max_samples > 0:
+        from bioreason2.dataset.cafa5.subset import select_dataset_subset
 
-    n_samples = len(eval_ds) if args.max_samples <= 0 else min(args.max_samples, len(eval_ds))
+        eval_ds, subset_summary = select_dataset_subset(
+            eval_ds,
+            max_samples=args.max_samples,
+            seed=args.seed,
+            strategy=args.sample_strategy,
+        )
+        print(
+            "📊 Using eval subset: "
+            f"strategy={subset_summary['strategy']}, "
+            f"requested={subset_summary['requested_samples']}, "
+            f"selected={subset_summary['selected_samples']}"
+        )
+        if subset_summary.get("group_counts"):
+            print(f"📊 Eval subset group counts: {subset_summary['group_counts']}")
+    else:
+        eval_ds = eval_ds.shuffle(seed=args.seed)
+
+    n_samples = len(eval_ds)
 
     # Handle chunking for multi-GPU processing
     if args.num_chunks > 1:
@@ -1279,6 +1297,13 @@ def setup_argument_parser() -> argparse.ArgumentParser:
         help="Dataset split to evaluate. Use validation for development and test for final reporting.",
     )
     eval_group.add_argument("--max_samples", type=int, default=-1, help="Max samples to process (-1 for all).")
+    eval_group.add_argument(
+        "--sample_strategy",
+        type=str,
+        default="stratified_aspect_profile",
+        choices=["stratified_aspect_profile", "shuffled_prefix"],
+        help="Subset strategy used when max_samples > 0.",
+    )
     eval_group.add_argument("--max_new_tokens", type=int, default=1024)
     eval_group.add_argument("--temperature", type=float, default=0.1)
     eval_group.add_argument("--top_p", type=float, default=0.9)

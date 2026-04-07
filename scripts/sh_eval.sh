@@ -68,7 +68,16 @@ CHUNK_ID=${CHUNK_ID:-0}
 # ===================================================================================================
 # Evaluation Parameters
 # ===================================================================================================
-MAX_SAMPLES=${MAX_SAMPLES:-1}
+EVAL_SPLIT=${EVAL_SPLIT:-validation}
+MAX_SAMPLES=${MAX_SAMPLES:-}
+if [ -z "${MAX_SAMPLES// }" ]; then
+  if [ "$EVAL_SPLIT" = "validation" ]; then
+    MAX_SAMPLES=100
+  else
+    MAX_SAMPLES=-1
+  fi
+fi
+SAMPLE_STRATEGY=${SAMPLE_STRATEGY:-stratified_aspect_profile}
 MAX_LENGTH_PROTEIN=2000
 MAX_NEW_TOKENS=5000
 TEMPERATURE=0
@@ -101,7 +110,6 @@ MIN_GO_MF_FREQ=1
 MIN_GO_BP_FREQ=1
 MIN_GO_CC_FREQ=1
 APPLY_GO_FILTERING_TO_VAL_TEST=False
-EVAL_SPLIT=${EVAL_SPLIT:-validation}
 BENCHMARK_VERSION=${BENCHMARK_VERSION:-}
 MODEL_NAME=${MODEL_NAME:-}
 TEMPORAL_SPLIT_ARTIFACT=${TEMPORAL_SPLIT_ARTIFACT:-}
@@ -253,6 +261,7 @@ python "$EVAL_SCRIPT" \
     --metric_threads $METRIC_THREADS \
     --eval_split "$EVAL_SPLIT" \
     --max_samples $MAX_SAMPLES \
+    --sample_strategy "$SAMPLE_STRATEGY" \
     --max_length_protein $MAX_LENGTH_PROTEIN \
     --max_new_tokens $MAX_NEW_TOKENS \
     --temperature $TEMPERATURE \

@@ -105,7 +105,7 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="validation",
         choices=["validation", "test"],
-        help="Evaluation split to run.",
+        help="Evaluation split to run. Validation defaults to a 100-sample stratified subset; test defaults to the full split.",
     )
     parser.add_argument(
         "--output-root",
@@ -149,7 +149,18 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--metric-threads", type=int, default=0)
     parser.add_argument("--metric-threshold-step", type=float, default=0.99)
-    parser.add_argument("--max-samples", type=int, default=-1)
+    parser.add_argument(
+        "--max-samples",
+        type=int,
+        default=None,
+        help="Override sample count. Defaults to 100 for validation and full split for test.",
+    )
+    parser.add_argument(
+        "--sample-strategy",
+        type=str,
+        default="stratified_aspect_profile",
+        choices=["stratified_aspect_profile", "shuffled_prefix"],
+    )
     parser.add_argument("--num-chunks", type=int, default=1)
     parser.add_argument("--chunk-id", type=int, default=0)
     parser.add_argument(
@@ -214,6 +225,14 @@ def with_bundle_context(target: Mapping[str, Any], bundle: Mapping[str, Any]) ->
 def ensure_parent(path_value: str) -> str:
     Path(path_value).parent.mkdir(parents=True, exist_ok=True)
     return path_value
+
+
+def resolve_effective_max_samples(args: argparse.Namespace) -> int:
+    if args.max_samples is not None:
+        return args.max_samples
+    if args.split == "validation":
+        return 100
+    return -1
 
 
 def resolve_dataset_loader_source(asset: Mapping[str, Any]) -> str:
@@ -309,7 +328,8 @@ def run_protein_llm_target(
             "TEST_END_RELEASE": normalize_text(bundle.get("test_end_release")),
             "METRIC_THREADS": str(args.metric_threads),
             "METRIC_THRESHOLD_STEP": str(args.metric_threshold_step),
-            "MAX_SAMPLES": str(args.max_samples),
+            "MAX_SAMPLES": str(resolve_effective_max_samples(args)),
+            "SAMPLE_STRATEGY": normalize_text(getattr(args, "sample_strategy", "stratified_aspect_profile")),
             "NUM_CHUNKS": str(args.num_chunks),
             "CHUNK_ID": str(args.chunk_id),
             "WANDB_PROJECT": normalize_text(args.wandb_project),
@@ -332,6 +352,7 @@ def run_protein_llm_target(
         "status": "completed",
         "output_dir": str(output_dir),
         "model_source": resolved_model.get("source_ref"),
+        "max_samples": resolve_effective_max_samples(args),
     }
 
 

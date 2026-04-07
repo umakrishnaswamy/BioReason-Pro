@@ -161,11 +161,12 @@ split 名は `train` / `validation` / `test` に固定する。
 
 - SFT / RL / eval は **同じ benchmark split** を使う
 - SFT は reasoning dataset の `train` を学習に使う
-- SFT の checkpoint selection には `validation` を使う
+- SFT の checkpoint selection には `validation` から deterministic に切り出した **100-sample stratified subset** を使う
 - RL の rollout / reward 最適化には `train` を使う
-- RL の checkpoint selection と offline sanity-check には `validation` を使う
+- RL の checkpoint selection と offline sanity-check には `validation` から deterministic に切り出した **100-sample stratified subset** を使う
 - `test` は最終評価専用であり、学習信号には使わない
 - RL 用の派生 dataset を作る場合も、元データは `train` split のみから作る
+- stratified subset は `go_aspect` と label-profile を保つ `stratified_aspect_profile` で作る
 
 ## 5. データの準備
 
@@ -284,7 +285,9 @@ Weaveは weave.init()で開始する
 split の使い分け:
 
 - 開発中の比較、ablation、checkpoint 比較は `validation`
-- 最終報告値は `test`
+- `validation` run は deterministic な **100-sample stratified subset** を使う
+- 最終報告値は separate run の `test`
+- `test` run は full split を使う
 
 ### 7.2 定量評価
 
@@ -312,6 +315,8 @@ target family:
 
 - 推論の関数は、weaveでtraceをする
 - test (最終報告値)
+    - SFT / RL のあとに **別 run** として実行する
+    - full `test` split を使う
     - Weave の Evaluation Loggerを使って評価をする
     - Weaveを使うが、同時に評価 summary を **1 evaluated target = 1 row** の W&B Table として保存する
         - 列: model_name, split, benchmark_version, <accuracyのmetricが各列に続く>
@@ -321,6 +326,7 @@ target family:
     - local eval 出力は scratch とみなし、W&B 保存成功後は既定で cleanup してよい
 
 - 開発中の比較、ablation、checkpoint 比較は `validation`
+    - deterministic な **100-sample stratified subset** を使う
     - この時には、metricsだけで良い
 
 
@@ -342,12 +348,13 @@ W&B run は `wandb.init(..., job_type="train_sft")` で開始する。
 固定ルール:
 
 - 学習には reasoning dataset の `train` split を使う
-- checkpoint selection には `validation` split を使う
+- checkpoint selection には `validation` から deterministic に切り出した **100-sample stratified subset** を使う
 - `test` split は SFT 学習に使わない
 - tuning 前の比較モデルは W&B Artifact ref から materialize して使う
 - canonical な SFT 実行は **stage 2 only** とする
 - canonical では、比較モデルに含まれる projector / GO module 重みをそのまま warm-start として使う
 - stage 1 の projector warm-up は、学習不安定時の fallback または ablation としてのみ扱う
+- validation subset の戦略は `stratified_aspect_profile` に固定する
 - train / validation metric を `wandb.log()` で保存する
 - sample table を W&B Table として保存する
 - output checkpoint を W&B Artifact として登録する
@@ -381,12 +388,13 @@ W&B run は `wandb.init(..., job_type="train_rl")` で開始する。
 固定ルール:
 
 - rollout / reward 最適化には benchmark の `train` split を使う
-- checkpoint selection と offline sanity-check には `validation` split を使う
+- checkpoint selection と offline sanity-check には `validation` から deterministic に切り出した **100-sample stratified subset** を使う
 - `test` split は RL 学習に使わない
 - RL 用 dataset を派生生成する場合も、元データは `train` split のみから作る
 - canonical input は `train-sft-output` artifact
 - `train-sft-output` artifact が raw Lightning checkpoint のみを含む場合、RL 開始前に HF model へ変換してから使う
 - `bioreason-pro-rl-paper` から直接 RL を始める経路は、必要な場合に限って ablation として扱う
+- validation subset の戦略は `stratified_aspect_profile` に固定する
 - reward 系 metric、KL 系 metric、学習安定性指標を `wandb.log()` で保存する
 - rollout trace は Weave で保存する
 - RL 出力 checkpoint を W&B Artifact として登録する

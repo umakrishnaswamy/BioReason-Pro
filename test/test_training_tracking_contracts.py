@@ -76,6 +76,10 @@ class TrainingTrackingContractsTest(unittest.TestCase):
             batch_size=4,
             gradient_accumulation_steps=2,
             max_epochs=10,
+            validation_subset_size=100,
+            validation_subset_strategy="stratified_aspect_profile",
+            max_eval_samples=None,
+            eval_sample_strategy=None,
             job_time_limit="12:00:00",
             training_stage=2,
             cafa5_dataset_name="disease_temporal_hc_reasoning_v1",
@@ -98,6 +102,8 @@ class TrainingTrackingContractsTest(unittest.TestCase):
         self.assertEqual(config["model_artifact"], "disease-sft-checkpoints")
         self.assertEqual(config["job_time_limit"], "12:00:00")
         self.assertEqual(config["num_train_epochs"], 10)
+        self.assertEqual(config["validation_subset_size"], 100)
+        self.assertEqual(config["validation_subset_strategy"], "stratified_aspect_profile")
 
     def test_build_training_tracking_config_uses_output_dir_when_checkpoint_dir_missing(self):
         args = types.SimpleNamespace(
@@ -123,6 +129,10 @@ class TrainingTrackingContractsTest(unittest.TestCase):
             batch_size=1,
             gradient_accumulation_steps=1,
             max_epochs=1,
+            validation_subset_size=None,
+            validation_subset_strategy=None,
+            max_eval_samples=100,
+            eval_sample_strategy="stratified_aspect_profile",
             job_time_limit="12:00:00",
             training_stage=None,
             cafa5_dataset_name="disease_temporal_hc_reasoning_v1",
@@ -139,6 +149,8 @@ class TrainingTrackingContractsTest(unittest.TestCase):
         )
 
         self.assertEqual(config["output_dir"], "data/artifacts/models/train_rl_output/demo")
+        self.assertEqual(config["max_eval_samples"], 100)
+        self.assertEqual(config["eval_sample_strategy"], "stratified_aspect_profile")
         self.assertEqual(metadata["checkpoint_dir"], "data/artifacts/models/train_rl_output/demo")
 
     def test_build_sft_sample_row_is_one_row_per_sample(self):

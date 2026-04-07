@@ -226,6 +226,24 @@ class ProteinLLMFineTuner(pl.LightningModule):
                 
                 print("✓ GO encoder weights loaded successfully (with architecture compatibility).")
 
+            checkpoint_dir_candidates = [
+                os.path.dirname(path)
+                for path in [
+                    self.go_projection_checkpoint_path,
+                    self.go_encoder_checkpoint_path,
+                    self.projector_checkpoint_path,
+                ]
+                if path
+            ]
+            for checkpoint_dir in checkpoint_dir_candidates:
+                go_embedding_cache_path = os.path.join(checkpoint_dir, "go_embedding.pt")
+                if os.path.exists(go_embedding_cache_path):
+                    try:
+                        self.model.load_precomputed_go_embedding_cache(go_embedding_cache_path, aspect="all")
+                    except Exception as exc:
+                        print(f"⚠️  Failed to load checkpoint-bundled GO embedding cache: {exc}")
+                    break
+
         self.text_model = self.model.text_model
         self.protein_model = self.model.protein_model
         self.protein_projection = self.model.protein_projection
@@ -824,6 +842,24 @@ def main(args: ArgumentParser):
             f"Mixed dataset totals - Train: {len(train_dataset)}, Val: {len(val_dataset)}, Test: {len(test_dataset)} samples"
         )
 
+        if args.validation_subset_size > 0:
+            from bioreason2.dataset.cafa5.subset import select_dataset_subset
+
+            val_dataset, subset_summary = select_dataset_subset(
+                val_dataset,
+                max_samples=args.validation_subset_size,
+                seed=args.seed,
+                strategy=args.validation_subset_strategy,
+            )
+            print(
+                "Using validation subset for checkpoint selection: "
+                f"strategy={subset_summary['strategy']}, "
+                f"requested={subset_summary['requested_samples']}, "
+                f"selected={subset_summary['selected_samples']}"
+            )
+            if subset_summary.get("group_counts"):
+                print(f"Validation subset group counts: {subset_summary['group_counts']}")
+
     # Setup directories
     os.makedirs(args.checkpoint_dir, exist_ok=True)
     if args.run_name:
@@ -1142,6 +1178,13 @@ if __name__ == "__main__":
     parser.add_argument("--return_answer_in_batch", type=str2bool, default=False)
     parser.add_argument("--save_top_k", type=int, default=1)
     parser.add_argument("--val_check_interval", type=float, default=0.2)
+    parser.add_argument("--validation_subset_size", type=int, default=100)
+    parser.add_argument(
+        "--validation_subset_strategy",
+        type=str,
+        default="stratified_aspect_profile",
+        choices=["stratified_aspect_profile", "shuffled_prefix"],
+    )
     parser.add_argument("--warmup_ratio", type=float, default=0.1)
     parser.add_argument("--include_ground_truth_in_final_answer", type=str2bool, default=True)
     parser.add_argument("--add_uniprot_summary", type=str2bool, default=False)

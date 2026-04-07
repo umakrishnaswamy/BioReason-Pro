@@ -7,6 +7,7 @@ from transformers import (
 from unsloth import FastLanguageModel
 
 from typing import Optional, List, Union
+from pathlib import Path
 
 from bioreason2.models.pl.processing_pl import PLProcessor
 from bioreason2.models.pl.chat_template_pl import get_chat_template
@@ -144,9 +145,17 @@ class ProteinLLMModel(nn.Module):
 
         self.text_model.resize_token_embeddings(len(self.text_tokenizer))
 
-        # Load the protein encoder (ESM3 or ESM-C)
+        # Load the protein encoder (ESM3 or ESM-C). When the text checkpoint is a
+        # materialized BioReason-Pro artifact, prefer its bundled protein_model/.
+        resolved_protein_model_name = protein_model_name
+        text_model_path = Path(text_model_name).expanduser()
+        checkpoint_protein_model = text_model_path / "protein_model"
+        if text_model_path.exists() and checkpoint_protein_model.is_dir():
+            resolved_protein_model_name = str(checkpoint_protein_model)
+            print(f"📁 Using checkpoint-bundled protein model from {checkpoint_protein_model}")
+
         self.protein_encoder = create_protein_encoder(
-            protein_model_name, 
+            resolved_protein_model_name,
             inference_mode=not protein_model_finetune,
             embedding_layer=protein_embedding_layer
         )
@@ -158,6 +167,7 @@ class ProteinLLMModel(nn.Module):
 
         # Initialize GO graph encoder if paths are provided
         self.go_encoder = None
+        self.go_embeddings_cache = {}
         if go_obo_path is not None and precomputed_embeddings_path is not None:
             self.go_encoder = create_go_graph_encoder_pipeline(
                 go_obo_path=go_obo_path,
@@ -169,15 +179,13 @@ class ProteinLLMModel(nn.Module):
                 embedding_dim=go_embedding_dim,
                 unified_go_encoder=unified_go_encoder
             )
-
-            # Create projection layer for GO embeddings to text space
-            self.go_projection = nn.Sequential(
-                nn.Linear(go_embedding_dim, self.text_hidden_size),
-                nn.GELU(),
-                nn.Linear(self.text_hidden_size, self.text_hidden_size),
-            )
-        else:
-            self.go_projection = None
+        # Always create projection layer for GO embeddings so checkpoint-bundled
+        # GO embeddings can be used even when the GO encoder source directory is absent.
+        self.go_projection = nn.Sequential(
+            nn.Linear(go_embedding_dim, self.text_hidden_size),
+            nn.GELU(),
+            nn.Linear(self.text_hidden_size, self.text_hidden_size),
+        )
 
         # Create projection layer to map protein embeddings to text model's embedding space
         self.protein_projection = nn.Sequential(
@@ -288,15 +296,22 @@ class ProteinLLMModel(nn.Module):
             or combined all aspects when aspect is None or "all".
             Returns None if no GO encoder is available.
         """
-        if self.go_encoder is None or go_aspects is None:
+        if go_aspects is None:
+            return None
+        if self.go_encoder is None and not self.go_embeddings_cache:
             return None
 
         batch_go_embeddings = []
 
         if self.unified_go_encoder:
-            # For unified encoder, do one forward pass and duplicate for all batch items
-            # Namespace doesn't matter for unified encoder
-            reduced_embeddings = self.go_encoder("all")  # (200, 2560)
+            # Namespace doesn't matter for unified encoder. Prefer a checkpoint-bundled
+            # cached tensor when available, otherwise compute via the encoder.
+            if "all" in self.go_embeddings_cache:
+                reduced_embeddings = self.go_embeddings_cache["all"]
+            else:
+                reduced_embeddings = self.go_encoder("all")  # (200, 2560)
+                if not self.go_model_finetune:
+                    self.go_embeddings_cache["all"] = reduced_embeddings
 
             # Project to text embedding space
             if self.go_projection is not None:
@@ -318,8 +333,15 @@ class ProteinLLMModel(nn.Module):
                 else:
                     aspect = "all"
 
-                # Get reduced embeddings for this specific aspect (200, 2560)
-                reduced_embeddings = self.go_encoder(aspect)
+                if aspect in self.go_embeddings_cache:
+                    reduced_embeddings = self.go_embeddings_cache[aspect]
+                elif "all" in self.go_embeddings_cache:
+                    reduced_embeddings = self.go_embeddings_cache["all"]
+                else:
+                    # Get reduced embeddings for this specific aspect (200, 2560)
+                    reduced_embeddings = self.go_encoder(aspect)
+                    if not self.go_model_finetune:
+                        self.go_embeddings_cache[aspect] = reduced_embeddings
 
                 # Project to text embedding space
                 if self.go_projection is not None:
@@ -331,6 +353,22 @@ class ProteinLLMModel(nn.Module):
                 batch_go_embeddings.append(reduced_embeddings)
 
         return batch_go_embeddings
+
+    def load_precomputed_go_embedding_cache(self, embedding_path: str, aspect: str = "all") -> None:
+        """
+        Load checkpoint-bundled GO embeddings when the full GO encoder source
+        directory is not available locally.
+        """
+        cache_path = Path(embedding_path)
+        if not cache_path.exists():
+            raise FileNotFoundError(f"GO embedding cache not found: {cache_path}")
+
+        cached_embedding = torch.load(cache_path, map_location="cpu")
+        if not isinstance(cached_embedding, torch.Tensor):
+            raise TypeError(f"Expected a torch.Tensor in {cache_path}, got {type(cached_embedding)!r}")
+
+        self.go_embeddings_cache[aspect] = cached_embedding
+        print(f"✅ Loaded checkpoint-bundled GO embedding cache from {cache_path} for aspect '{aspect}'")
 
     def forward(
         self,

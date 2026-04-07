@@ -107,7 +107,8 @@ MAX_STEPS=${MAX_STEPS:-200}
 MAX_EPOCHS=${MAX_EPOCHS:-1}
 GRADIENT_ACCUMULATION_STEPS=${GRADIENT_ACCUMULATION_STEPS:-1}
 MAX_TRAIN_SAMPLES=${MAX_TRAIN_SAMPLES:--1}
-MAX_EVAL_SAMPLES=${MAX_EVAL_SAMPLES:-64}
+MAX_EVAL_SAMPLES=${MAX_EVAL_SAMPLES:-100}
+EVAL_SAMPLE_STRATEGY=${EVAL_SAMPLE_STRATEGY:-"stratified_aspect_profile"}
 EVAL_EVERY_N_STEPS=${EVAL_EVERY_N_STEPS:-25}
 SAVE_EVERY_N_STEPS=${SAVE_EVERY_N_STEPS:-50}
 MAX_EVAL_BATCHES=${MAX_EVAL_BATCHES:-8}
@@ -317,6 +318,7 @@ stdbuf -oL -eL srun python train_protein_grpo.py \
   --gradient_accumulation_steps "$GRADIENT_ACCUMULATION_STEPS" \
   --max_train_samples "$MAX_TRAIN_SAMPLES" \
   --max_eval_samples "$MAX_EVAL_SAMPLES" \
+  --eval_sample_strategy "$EVAL_SAMPLE_STRATEGY" \
   --eval_every_n_steps "$EVAL_EVERY_N_STEPS" \
   --save_every_n_steps "$SAVE_EVERY_N_STEPS" \
   --max_eval_batches "$MAX_EVAL_BATCHES" \

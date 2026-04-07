@@ -283,7 +283,9 @@ target family は manifest 上で次を使う。
 split の使い分けは次で固定する。
 
 - 開発中の比較、ablation、checkpoint 比較: `validation`
-- 最終報告値: `test`
+- `validation` は deterministic な **100-sample stratified subset** を使う
+- 最終報告値: separate run の `test`
+- `test` は full split を使う
 
 ### 3.2 比較モデルを `validation` で評価する
 
@@ -302,6 +304,7 @@ srun \
       --target-group comparison-family \
       --data-bundle main_production \
       --split validation \
+      --max-samples 100 \
       --wandb-entity "$WANDB_ENTITY" \
       --wandb-project "$WANDB_PROJECT"
   '
@@ -324,6 +327,7 @@ srun \
       --target bioreason-pro-rl-paper \
       --data-bundle main_production \
       --split validation \
+      --max-samples 100 \
       --wandb-entity "$WANDB_ENTITY" \
       --wandb-project "$WANDB_PROJECT"
   '
@@ -331,7 +335,7 @@ srun \
 
 ### 3.4 評価で W&B に保存されるもの
 
-`validation` run では metric のみを W&B に保存する。
+`validation` run では deterministic な **100-sample stratified subset** に対する metric のみを W&B に保存する。
 
 - `fmax_mf`
 - `fmax_bp`
@@ -360,8 +364,8 @@ SFT の入力は次で固定する。
 - reasoning dataset artifact: `BIOREASON_MAIN_REASONING_DATASET_REGISTRY_PATH`
 - comparison model artifact: `BIOREASON_RL_PAPER_MODEL_REGISTRY_PATH`
 
-SFT は reasoning dataset の `train` を学習に使い、`validation` で checkpoint selection を行う。  
-`test` は最終評価専用であり、SFT 学習には使わない。
+SFT は reasoning dataset の `train` を学習に使い、`validation` から deterministic に切り出した **100-sample stratified subset** で checkpoint selection を行う。  
+`test` は最終評価専用であり、SFT 学習には使わない。最終比較は SFT 後に別 run の `eval` で出す。
 canonical run は **stage 2 only** とし、comparison model に含まれる projector / GO module 重みをそのまま warm-start として使う。
 
 ### 4.2 実行コマンド
@@ -376,6 +380,7 @@ bash scripts/sh_train_protein_qwen_staged.sh
 この wrapper は内部で `srun python train_protein_llm.py ...` を呼ぶ。  
 comparison model を初期値として使い、既定では **stage 2 only** で SFT を行う。  
 `RUN_STAGE1=true` を明示したときだけ、projector warm-up を先に回す。
+既定では `VALIDATION_SUBSET_SIZE=100`、`VALIDATION_SUBSET_STRATEGY=stratified_aspect_profile` が使われる。
 
 ### 4.3 実行後にやること
 
@@ -407,6 +412,7 @@ entry point は [train_protein_grpo.py](/Users/keisuke/Project/learning/drug_dis
 
 - RL の rollout / reward 最適化には benchmark の `train` split を使う
 - checkpoint selection と offline sanity-check には `validation` split を使う
+- checkpoint selection と offline sanity-check には `validation` から deterministic に切り出した **100-sample stratified subset** を使う
 - `test` split は RL 学習に使わない
 - RL 用派生 dataset を作る場合も、元データは `train` split のみから作る
 - `bioreason-pro-rl-paper` から直接 RL を始める経路は ablation としてのみ扱う
@@ -430,10 +436,11 @@ bash scripts/sh_train_protein_grpo.sh
 
 この wrapper は内部で `srun python train_protein_grpo.py ...` を呼ぶ。  
 canonical には `BIOREASON_TRAIN_SFT_MODEL_REGISTRY_PATH` を使い、必要なら raw SFT checkpoint を HF model に変換してから RL を始める。
+既定では `MAX_EVAL_SAMPLES=100`、`EVAL_SAMPLE_STRATEGY=stratified_aspect_profile` が使われる。
 
 ### 5.2 RL 後の評価
 
-その後は `spec-comparison` を `test` split で評価する。
+その後は `spec-comparison` を `test` split の **separate eval run** で評価する。
 
 ```bash
 srun \

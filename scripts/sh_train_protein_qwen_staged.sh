@@ -52,11 +52,22 @@ as_bool() {
 # ===================================================================================================
 # Shared Configuration
 # ===================================================================================================
-BASE_WANDB_PROJECT=${BASE_WANDB_PROJECT:-"bioreason-pro-finetune"}
+BASE_WANDB_PROJECT=${BASE_WANDB_PROJECT:-"${WANDB_PROJECT:-bioreason-pro-finetune}"}
 WANDB_ENTITY=${WANDB_ENTITY:-""}
 TEXT_MODEL_NAME="Qwen/Qwen3-4B-Thinking-2507"
 EXPERIMENT_NAME="reasoning-sft"
 MODEL_SOURCE_RESOLVER=${MODEL_SOURCE_RESOLVER:-"scripts/materialize_model_source.py"}
+DATA_BUNDLE_RESOLVER=${DATA_BUNDLE_RESOLVER:-"scripts/materialize_data_bundle.py"}
+DATA_MANIFEST_PATH=${DATA_MANIFEST_PATH:-"configs/disease_benchmark/data_registry.json"}
+DATA_BUNDLE=${DATA_BUNDLE:-"main_production"}
+TRAIN_PARTITION=${TRAIN_PARTITION:-"h100"}
+TRAIN_NUM_GPUS=${TRAIN_NUM_GPUS:-1}
+TRAIN_NUM_NODES=${TRAIN_NUM_NODES:-1}
+TRAIN_CPUS_PER_TASK=${TRAIN_CPUS_PER_TASK:-16}
+TRAIN_MEM=${TRAIN_MEM:-"128G"}
+TRAIN_TIME_LIMIT=${TRAIN_TIME_LIMIT:-"12:00:00"}
+TRAIN_JOB_NAME=${TRAIN_JOB_NAME:-"bioreason-sft-stage2"}
+TRAIN_USE_SRUN=${TRAIN_USE_SRUN:-"True"}
 
 # --- Paths: Set these to your local directories ---
 BASE_CHECKPOINT_DIR=${BASE_CHECKPOINT_DIR:-"data/artifacts/models/bioreason_pro_rl_paper"}
@@ -67,7 +78,7 @@ GO_EMBEDDINGS_PATH=${GO_EMBEDDINGS_PATH:-"${BIOREASON_GO_EMBEDDINGS_PATH:-}"}
 GO_OBO_PATH=${GO_OBO_PATH:-"bioreason2/dataset/go-basic.obo"}
 
 # --- Dataset Configuration ---
-CAFA5_DATASET=${CAFA5_DATASET:-"wanglab/cafa5"}
+CAFA5_DATASET=${CAFA5_DATASET:-""}
 STAGE1_DATASET_NAME=${STAGE1_DATASET_NAME:-"disease_temporal_hc_reasoning_v1"}
 STAGE2_DATASET_NAME=${STAGE2_DATASET_NAME:-"disease_temporal_hc_reasoning_v1"}
 STAGE2_DATASET_WEIGHTS="1"
@@ -76,6 +87,8 @@ GO_GPT_PREDICTIONS_COLUMN="go_pred"
 INCLUDE_GROUND_TRUTH_IN_FINAL_ANSWER=False
 ADD_UNIPROT_SUMMARY=True
 IS_SWISSPROT=False
+VALIDATION_SUBSET_SIZE=${VALIDATION_SUBSET_SIZE:-100}
+VALIDATION_SUBSET_STRATEGY=${VALIDATION_SUBSET_STRATEGY:-"stratified_aspect_profile"}
 
 # --- Benchmark / Tracking Configuration ---
 BENCHMARK_VERSION="213 -> 221 -> 225 -> 228"
@@ -122,88 +135,121 @@ fi
 TEXT_MODEL_NAME="$RESOLVED_BASE_MODEL_DIR"
 echo "--- Pretuning comparison model materialized at $RESOLVED_BASE_MODEL_DIR"
 
+if [ -z "$CAFA5_DATASET" ]; then
+  echo "--- Resolving reasoning dataset source for SFT from W&B Artifact"
+  CAFA5_DATASET=$(python "$DATA_BUNDLE_RESOLVER" \
+    --data-manifest-path "$DATA_MANIFEST_PATH" \
+    --data-bundle "$DATA_BUNDLE" \
+    --asset-key reasoning_dataset \
+    --print-field local_dir)
+fi
+if [ -z "$CAFA5_DATASET" ]; then
+  echo "Error: failed to resolve reasoning dataset source"
+  exit 1
+fi
+echo "--- Reasoning dataset materialized at $CAFA5_DATASET"
+
 BASE_MODEL_PROJECTOR_WEIGHTS_PATH="${RESOLVED_BASE_MODEL_DIR:+$RESOLVED_BASE_MODEL_DIR/protein_projection.pt}"
 BASE_MODEL_GO_PROJECTOR_WEIGHTS_PATH="${RESOLVED_BASE_MODEL_DIR:+$RESOLVED_BASE_MODEL_DIR/go_projection.pt}"
 BASE_MODEL_GO_ENCODER_WEIGHTS_PATH="${RESOLVED_BASE_MODEL_DIR:+$RESOLVED_BASE_MODEL_DIR/go_encoder.pt}"
 RUN_STAGE1=${RUN_STAGE1:-"False"}
 
+BASE_COMMAND=()
+if as_bool "$TRAIN_USE_SRUN"; then
+  BASE_COMMAND+=(
+    srun
+    --job-name "$TRAIN_JOB_NAME"
+    --partition "$TRAIN_PARTITION"
+    --gpus "$TRAIN_NUM_GPUS"
+    --cpus-per-task "$TRAIN_CPUS_PER_TASK"
+    --mem "$TRAIN_MEM"
+    --time "$TRAIN_TIME_LIMIT"
+  )
+fi
 
-BASE_COMMAND="srun python train_protein_llm.py \
-    --cache_dir $CACHE_DIR \
-    --wandb_entity $WANDB_ENTITY \
-    --wandb_job_type train_sft \
-    --benchmark_version "$BENCHMARK_VERSION" \
-    --temporal_split_artifact "$TEMPORAL_SPLIT_ARTIFACT" \
-    --dataset_config "$DATASET_CONFIG" \
-    --reasoning_dataset_config "$REASONING_DATASET_CONFIG" \
-    --dataset_artifact "$DATASET_ARTIFACT" \
-    --shortlist_query "$SHORTLIST_QUERY" \
-    --shortlist_mode "$SHORTLIST_MODE" \
-    --train_start_release $TRAIN_START_RELEASE \
-    --train_end_release $TRAIN_END_RELEASE \
-    --dev_end_release $DEV_END_RELEASE \
-    --test_end_release $TEST_END_RELEASE \
-    --base_checkpoint "$BASE_CHECKPOINT" \
-    --job_time_limit "$JOB_TIME_LIMIT" \
-    --text_model_name ${TEXT_MODEL_NAME} \
-    --protein_model_name esm3_sm_open_v1 \
-    --strategy ddp_find_unused_parameters_false \
-    --use_qlora False \
-    --use_unsloth True \
-    --num_gpus -1 \
-    --batch_size 4 \
-    --num_nodes 2 \
-    --gradient_accumulation_steps 1 \
-    --model_type protein-llm \
-    --dataset_type cafa5 \
-    --cafa5_dataset $CAFA5_DATASET \
-    --reasoning_dataset_name $REASONING_DATASET_NAME \
-    --go_gpt_predictions_column $GO_GPT_PREDICTIONS_COLUMN \
-    --include_ground_truth_in_final_answer $INCLUDE_GROUND_TRUTH_IN_FINAL_ANSWER \
-    --add_uniprot_summary $ADD_UNIPROT_SUMMARY \
-    --is_swissprot $IS_SWISSPROT \
-    --dataset_cache_dir $DATASET_CACHE_DIR \
-    --cache_dir $CACHE_DIR \
-    --structure_dir $STRUCTURE_DIR \
-    --val_split_ratio 0.1 \
-    --max_length_protein $MAX_LENGTH_PROTEIN \
-    --max_length_text $MAX_LENGTH_TEXT \
-    --lora_rank $LORA_RANK \
-    --lora_alpha $LORA_ALPHA \
-    --lora_dropout $LORA_DROPOUT \
-    --protein_model_finetune False \
-    --protein_embedding_layer $ESM_LAYER \
-    --go_model_finetune True \
-    --attn_implementation flash_attention_2 \
-    --go_obo_path $GO_OBO_PATH \
-    --precomputed_embeddings_path $GO_EMBEDDINGS_PATH \
-    --go_hidden_dim 512 \
-    --go_num_gat_layers 3 \
-    --go_num_heads 8 \
-    --go_num_reduced_embeddings 200 \
-    --go_embedding_dim 2560 \
-    --unified_go_encoder True \
-    --return_answer_in_batch False \
-    --num_workers 8 \
-    --weight_decay 0.01 \
-    --seed 23 \
-    --save_top_k 1 \
-    --include_go_defs False \
-    --interpro_dataset_name interpro_metadata \
-    --split_go_aspects False \
-    --interpro_in_prompt $INTERPRO_IN_PROMPT \
-    --predict_interpro $PREDICT_INTERPRO \
-    --ppi_in_prompt $PPI_IN_PROMPT \
-    --include_protein_function_summary True \
-    --min_go_mf_freq 1 \
-    --min_go_bp_freq 1 \
-    --min_go_cc_freq 1 \
-    --apply_go_filtering_to_val_test False \
-    --log_every_n_steps 200 \
-    --enable_sample_generation True \
-    --verbose_sample_generation False \
-    --val_check_interval 0.2 \
-    --debug False"
+BASE_COMMAND+=(
+    python train_protein_llm.py
+    --cache_dir "$CACHE_DIR"
+    --wandb_entity "$WANDB_ENTITY"
+    --wandb_job_type train_sft
+    --benchmark_version "$BENCHMARK_VERSION"
+    --temporal_split_artifact "$TEMPORAL_SPLIT_ARTIFACT"
+    --dataset_config "$DATASET_CONFIG"
+    --reasoning_dataset_config "$REASONING_DATASET_CONFIG"
+    --dataset_artifact "$DATASET_ARTIFACT"
+    --shortlist_query "$SHORTLIST_QUERY"
+    --shortlist_mode "$SHORTLIST_MODE"
+    --train_start_release "$TRAIN_START_RELEASE"
+    --train_end_release "$TRAIN_END_RELEASE"
+    --dev_end_release "$DEV_END_RELEASE"
+    --test_end_release "$TEST_END_RELEASE"
+    --base_checkpoint "$BASE_CHECKPOINT"
+    --job_time_limit "$JOB_TIME_LIMIT"
+    --text_model_name "$TEXT_MODEL_NAME"
+    --protein_model_name esm3_sm_open_v1
+    --strategy ddp_find_unused_parameters_false
+    --use_qlora False
+    --use_unsloth True
+    --num_gpus "$TRAIN_NUM_GPUS"
+    --batch_size 4
+    --num_nodes "$TRAIN_NUM_NODES"
+    --gradient_accumulation_steps 1
+    --model_type protein-llm
+    --dataset_type cafa5
+    --cafa5_dataset "$CAFA5_DATASET"
+    --reasoning_dataset_name "$REASONING_DATASET_NAME"
+    --go_gpt_predictions_column "$GO_GPT_PREDICTIONS_COLUMN"
+    --include_ground_truth_in_final_answer "$INCLUDE_GROUND_TRUTH_IN_FINAL_ANSWER"
+    --add_uniprot_summary "$ADD_UNIPROT_SUMMARY"
+    --is_swissprot "$IS_SWISSPROT"
+    --dataset_cache_dir "$DATASET_CACHE_DIR"
+    --cache_dir "$CACHE_DIR"
+    --structure_dir "$STRUCTURE_DIR"
+    --val_split_ratio 0.1
+    --validation_subset_size "$VALIDATION_SUBSET_SIZE"
+    --validation_subset_strategy "$VALIDATION_SUBSET_STRATEGY"
+    --max_length_protein "$MAX_LENGTH_PROTEIN"
+    --max_length_text "$MAX_LENGTH_TEXT"
+    --lora_rank "$LORA_RANK"
+    --lora_alpha "$LORA_ALPHA"
+    --lora_dropout "$LORA_DROPOUT"
+    --protein_model_finetune False
+    --protein_embedding_layer "$ESM_LAYER"
+    --go_model_finetune True
+    --attn_implementation flash_attention_2
+    --go_obo_path "$GO_OBO_PATH"
+    --go_hidden_dim 512
+    --go_num_gat_layers 3
+    --go_num_heads 8
+    --go_num_reduced_embeddings 200
+    --go_embedding_dim 2560
+    --unified_go_encoder True
+    --return_answer_in_batch False
+    --num_workers 8
+    --weight_decay 0.01
+    --seed 23
+    --save_top_k 1
+    --include_go_defs False
+    --interpro_dataset_name interpro_metadata
+    --split_go_aspects False
+    --interpro_in_prompt "$INTERPRO_IN_PROMPT"
+    --predict_interpro "$PREDICT_INTERPRO"
+    --ppi_in_prompt "$PPI_IN_PROMPT"
+    --include_protein_function_summary True
+    --min_go_mf_freq 1
+    --min_go_bp_freq 1
+    --min_go_cc_freq 1
+    --apply_go_filtering_to_val_test False
+    --log_every_n_steps 200
+    --enable_sample_generation True
+    --verbose_sample_generation False
+    --val_check_interval 0.2
+    --debug False
+)
+
+if [ -n "$GO_EMBEDDINGS_PATH" ]; then
+  BASE_COMMAND+=(--precomputed_embeddings_path "$GO_EMBEDDINGS_PATH")
+fi
 # ===================================================================================================
 
 
@@ -224,7 +270,7 @@ if as_bool "$RUN_STAGE1"; then
   WANDB_RUN_NAME_S1="stage1-$(basename ${TEXT_MODEL_NAME})-${EXPERIMENT_NAME}"
   mkdir -p $STAGE1_CHECKPOINT_DIR
 
-  stdbuf -oL -eL $BASE_COMMAND \
+  stdbuf -oL -eL "${BASE_COMMAND[@]}" \
     ${BASE_MODEL_PROJECTOR_WEIGHTS_PATH:+--projector_checkpoint_path "$BASE_MODEL_PROJECTOR_WEIGHTS_PATH"} \
     ${BASE_MODEL_GO_PROJECTOR_WEIGHTS_PATH:+--go_projection_checkpoint_path "$BASE_MODEL_GO_PROJECTOR_WEIGHTS_PATH"} \
     ${BASE_MODEL_GO_ENCODER_WEIGHTS_PATH:+--go_encoder_checkpoint_path "$BASE_MODEL_GO_ENCODER_WEIGHTS_PATH"} \
@@ -283,7 +329,7 @@ else
     CKPT_ARG=""
 fi
 
-stdbuf -oL -eL $BASE_COMMAND \
+stdbuf -oL -eL "${BASE_COMMAND[@]}" \
     --run_name "${WANDB_RUN_NAME_S2}" \
     --checkpoint_artifact_name "${WANDB_RUN_NAME_S2}-checkpoints" \
     --cafa5_dataset_name $STAGE2_DATASET_NAME \

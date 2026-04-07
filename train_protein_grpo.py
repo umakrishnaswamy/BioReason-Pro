@@ -287,7 +287,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max_epochs", type=int, default=1)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--max_train_samples", type=int, default=-1)
-    parser.add_argument("--max_eval_samples", type=int, default=64)
+    parser.add_argument("--max_eval_samples", type=int, default=100)
+    parser.add_argument(
+        "--eval_sample_strategy",
+        type=str,
+        default="stratified_aspect_profile",
+        choices=["stratified_aspect_profile", "shuffled_prefix"],
+    )
     parser.add_argument("--eval_every_n_steps", type=int, default=25)
     parser.add_argument("--save_every_n_steps", type=int, default=50)
     parser.add_argument("--max_eval_batches", type=int, default=8)
@@ -489,6 +495,7 @@ def limit_dataset(dataset: Any, max_samples: int) -> Any:
 
 def load_rl_datasets(args: argparse.Namespace) -> Tuple[Any, Any]:
     from bioreason2.dataset.cafa5.load import load_cafa5_dataset
+    from bioreason2.dataset.cafa5.subset import select_dataset_subset
 
     train_dataset, val_dataset, _ = load_cafa5_dataset(
         dataset=args.cafa5_dataset,
@@ -513,7 +520,22 @@ def load_rl_datasets(args: argparse.Namespace) -> Tuple[Any, Any]:
         is_swissprot=args.is_swissprot,
         return_as_chat_template=True,
     )
-    return limit_dataset(train_dataset, args.max_train_samples), limit_dataset(val_dataset, args.max_eval_samples)
+    train_dataset = limit_dataset(train_dataset, args.max_train_samples)
+    val_dataset, subset_summary = select_dataset_subset(
+        val_dataset,
+        max_samples=args.max_eval_samples,
+        seed=args.seed,
+        strategy=args.eval_sample_strategy,
+    )
+    print(
+        "Using RL validation subset: "
+        f"strategy={subset_summary['strategy']}, "
+        f"requested={subset_summary['requested_samples']}, "
+        f"selected={subset_summary['selected_samples']}"
+    )
+    if subset_summary.get("group_counts"):
+        print(f"RL validation subset group counts: {subset_summary['group_counts']}")
+    return train_dataset, val_dataset
 
 
 def build_dataloader(dataset: Any, model: Any, batch_size: int, num_workers: int, shuffle: bool) -> Any:

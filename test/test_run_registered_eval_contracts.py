@@ -126,6 +126,7 @@ class RunRegisteredEvalContractsTest(unittest.TestCase):
             metric_threads=4,
             metric_threshold_step=0.95,
             max_samples=25,
+            sample_strategy="stratified_aspect_profile",
             num_chunks=1,
             chunk_id=0,
             keep_local_eval_outputs=False,
@@ -166,6 +167,14 @@ class RunRegisteredEvalContractsTest(unittest.TestCase):
         self.assertEqual(captured["env"]["EVAL_SPLIT"], "validation")
         self.assertEqual(captured["env"]["WANDB_RUN_NAME"], "eval-bioreason-pro-base-validation-213.221.225.228")
         self.assertEqual(captured["env"]["KEEP_LOCAL_EVAL_OUTPUTS"], "0")
+
+    def test_resolve_effective_max_samples_defaults_validation_to_100(self):
+        args = types.SimpleNamespace(split="validation", max_samples=None)
+        self.assertEqual(REGISTERED_EVAL.resolve_effective_max_samples(args), 100)
+
+    def test_resolve_effective_max_samples_defaults_test_to_full_split(self):
+        args = types.SimpleNamespace(split="test", max_samples=None)
+        self.assertEqual(REGISTERED_EVAL.resolve_effective_max_samples(args), -1)
 
     def test_run_prediction_artifact_target_writes_metrics_and_samples(self):
         bundle = {

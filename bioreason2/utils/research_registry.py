@@ -422,15 +422,16 @@ def materialize_bundle_asset(asset: Mapping[str, Any]) -> Dict[str, Any]:
     wandb_registry_path = resolve_wandb_registry_path(asset)
     required_paths = list(asset.get("required_paths", []))
     artifact_metadata: Dict[str, Any] = {}
+    dataset_source = normalize_text(asset.get("dataset_source"))
+    dataset_name = normalize_text(asset.get("dataset_name"))
 
-    if wandb_registry_path:
+    if wandb_registry_path and (not dataset_source or not dataset_name):
         try:
             artifact_metadata = get_wandb_artifact_metadata(wandb_registry_path)
         except RegistryError:
             artifact_metadata = {}
-
-    dataset_source = normalize_text(asset.get("dataset_source") or artifact_metadata.get("dataset_source"))
-    dataset_name = normalize_text(asset.get("dataset_name") or artifact_metadata.get("dataset_name"))
+        dataset_source = normalize_text(dataset_source or artifact_metadata.get("dataset_source"))
+        dataset_name = normalize_text(dataset_name or artifact_metadata.get("dataset_name"))
 
     if local_dir and directory_has_content(local_dir, required_paths):
         return {

@@ -75,6 +75,8 @@ class TrainProteinGrpoContractsTest(unittest.TestCase):
         self.assertEqual(args.reasoning_dataset_config, "disease_temporal_hc_reasoning_v1")
         self.assertEqual(args.checkpoint_artifact_name, "train-rl-output")
         self.assertEqual(args.output_dir, "data/artifacts/models/train_rl_output")
+        self.assertEqual(args.max_eval_samples, 100)
+        self.assertEqual(args.eval_sample_strategy, "stratified_aspect_profile")
         self.assertFalse(args.ablation_from_paper_rl)
 
 

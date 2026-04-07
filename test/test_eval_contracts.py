@@ -44,7 +44,9 @@ def install_eval_test_stubs():
     protein_vllm_module = types.ModuleType("bioreason2.models.protein_vllm")
     dataset_module = types.ModuleType("bioreason2.dataset")
     cafa5_module = types.ModuleType("bioreason2.dataset.cafa5")
+    cafa5_module.__path__ = []
     cafa5_load_module = types.ModuleType("bioreason2.dataset.cafa5.load")
+    cafa5_subset_module = types.ModuleType("bioreason2.dataset.cafa5.subset")
     utils_module = types.ModuleType("bioreason2.utils")
     wandb_module = types.ModuleType("wandb")
     weave_module = types.ModuleType("weave")
@@ -60,8 +62,22 @@ def install_eval_test_stubs():
             return value
         return str(value).lower() in {"1", "true", "yes", "y"}
 
+    def select_dataset_subset(dataset, max_samples, seed, strategy="stratified_aspect_profile"):
+        if max_samples is None or max_samples < 0 or len(dataset) <= max_samples:
+            return dataset, {
+                "strategy": "full",
+                "requested_samples": max_samples,
+                "selected_samples": len(dataset),
+            }
+        return dataset.select(range(max_samples)), {
+            "strategy": strategy,
+            "requested_samples": max_samples,
+            "selected_samples": max_samples,
+        }
+
     protein_vllm_module.ProteinLLMModel = ProteinLLMModel
     cafa5_load_module.load_cafa5_dataset = load_cafa5_dataset
+    cafa5_subset_module.select_dataset_subset = select_dataset_subset
     utils_module.str2bool = str2bool
 
     class FakeTable:
@@ -175,6 +191,7 @@ def install_eval_test_stubs():
     sys.modules["bioreason2.dataset"] = dataset_module
     sys.modules["bioreason2.dataset.cafa5"] = cafa5_module
     sys.modules["bioreason2.dataset.cafa5.load"] = cafa5_load_module
+    sys.modules["bioreason2.dataset.cafa5.subset"] = cafa5_subset_module
     sys.modules["bioreason2.utils"] = utils_module
     sys.modules["wandb"] = wandb_module
     sys.modules["weave"] = weave_module
@@ -250,6 +267,7 @@ def make_eval_args(**overrides):
         add_uniprot_summary=True,
         eval_split="validation",
         max_samples=-1,
+        sample_strategy="stratified_aspect_profile",
         max_model_len=32768,
         max_new_tokens=1024,
         temperature=0.1,
@@ -365,7 +383,7 @@ class EvalContractTests(unittest.TestCase):
             ]
         )
 
-        args = make_eval_args(eval_split="test", max_samples=2)
+        args = make_eval_args(eval_split="test", max_samples=2, sample_strategy="shuffled_prefix")
 
         with mock.patch.object(EVAL, "load_cafa5_dataset", return_value=(train_ds, val_ds, test_ds)):
             samples = EVAL.load_dataset(args)

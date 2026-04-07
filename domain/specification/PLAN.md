@@ -26,14 +26,14 @@
 | reasoning dataset 作成 | 完了 | `wandb-healthcare/bioreason-pro-custom/disease-temporal-reasoning:production` |
 | comparison model artifact 確定 | 完了 | `wandb-healthcare/bioreason-pro-custom/bioreason-pro-rl:production` |
 | CoreWeave 実行フロー整理 | 完了 | `srun` ベースの実行、remote env、artifact 解決、1-sample smoke まで確認済み |
-| comparison model の validation 評価 | 再実行待ち | 評価仕様変更に合わせて metrics-only run へ切り替え、再実行する |
+| comparison model の validation 評価 | 再実行中 | metrics-only / stratified 100-sample validation run で確認する |
 | SFT | 実行中 | `stage 2 only` の SFT run を CoreWeave で実行中 |
 | RL | 準備済み | `train_protein_grpo.py` と `scripts/sh_train_protein_grpo.sh` は実装済み、run は未実施 |
 
 ### 0.3 いま次にやること
 
-次の実行対象は **`comparison-family` validation を新仕様で再実行し、並行して `stage 2 only` SFT の進捗を確認すること** である。  
-その後、validation metric を確認して RL に進む。
+次の実行対象は **`comparison-family` validation を 100-sample stratified で確認し、並行して `stage 2 only` SFT の進捗を確認すること** である。  
+その後、validation metric を確認して RL に進み、最終報告値は別 run の `test` eval で出す。
 
 ## 1. データの準備
 
@@ -175,7 +175,8 @@ cp configs/disease_benchmark/wandb_asset_sources.env.example \
 ### 3.1 目的
 
 独自 tuning 前の比較モデル `bioreason-pro-rl-paper` を、現在採用している benchmark 上で `validation` split で評価する。  
-このフェーズでは **metrics のみ** を W&B に残し、table や eval artifact は要求しない。
+このフェーズでは **metrics のみ** を W&B に残し、table や eval artifact は要求しない。  
+`validation` は full split ではなく、`go_aspect` と label-profile を保つ deterministic な **100-sample stratified subset** で回す。
 
 ### 3.2 評価対象
 
@@ -218,6 +219,7 @@ W&B 上に次が見えていれば完了とする。
 - `overall_mean_fmax`
 
 validation run では metrics が保存されていれば十分であり、`eval_summary` table、`eval_samples` table、eval artifact は要求しない。
+sample 数は既定で `100`、subset 戦略は `stratified_aspect_profile` に固定する。
 
 ### 3.5 このフェーズが終わったらやること
 
@@ -256,12 +258,13 @@ bash scripts/sh_train_protein_qwen_staged.sh
 ### 4.4 固定ルール
 
 - 学習には `train` split を使う
-- checkpoint selection には `validation` split を使う
+- checkpoint selection には `validation` から deterministic に切り出した **100-sample stratified subset** を使う
 - `test` split は使わない
 - `job_type=train_sft`
 - wall time は `12:00:00`
 - canonical は `stage 2 only`
 - `RUN_STAGE1=true` は fallback / ablation のときだけ使う
+- validation subset は `VALIDATION_SUBSET_SIZE=100`, `VALIDATION_SUBSET_STRATEGY=stratified_aspect_profile` に固定する
 
 ### 4.5 完了条件
 
@@ -289,11 +292,12 @@ export BIOREASON_TRAIN_SFT_MODEL_REGISTRY_PATH="entity/project/train-sft-output:
 ### 5.2 固定ルール
 
 - rollout / reward 最適化には `train` split を使う
-- checkpoint selection と offline sanity-check には `validation` split を使う
+- checkpoint selection と offline sanity-check には `validation` から deterministic に切り出した **100-sample stratified subset** を使う
 - `test` split は使わない
 - `job_type=train_rl`
 - wall time は `12:00:00`
 - `bioreason-pro-rl-paper` から直接 RL を始める経路は ablation のみ
+- validation subset は `MAX_EVAL_SAMPLES=100`, `EVAL_SAMPLE_STRATEGY=stratified_aspect_profile` に固定する
 
 ### 5.3 実行コマンド
 
@@ -329,7 +333,7 @@ export BIOREASON_TRAIN_RL_MODEL_REGISTRY_PATH="entity/project/train-rl-output:al
 
 ### 6.1 目的
 
-`spec-comparison` を `test` split で評価し、最終比較を出す。
+`spec-comparison` を `test` split で separate run として評価し、最終比較を出す。
 
 ### 6.2 実行コマンド
 
