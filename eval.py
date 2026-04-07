@@ -671,6 +671,16 @@ def build_wandb_table(rows: List[Dict[str, Any]]):
     return wandb.Table(columns=columns, data=data)
 
 
+def should_log_eval_tables(args) -> bool:
+    """Only final test runs need table-style eval outputs."""
+    return getattr(args, "eval_split", "validation") == "test"
+
+
+def should_run_weave_evaluation(args) -> bool:
+    """Weave Evaluation is only required for final test reporting."""
+    return getattr(args, "eval_split", "validation") == "test"
+
+
 def maybe_init_wandb_run(args, run_summary: Dict[str, Any], metrics_summary: Dict[str, Any]):
     """Initialize an optional W&B eval run."""
     if wandb is None:
@@ -710,7 +720,7 @@ def log_eval_outputs_to_wandb(
     metrics_summary: Dict[str, Any],
     sample_rows: List[Dict[str, Any]],
 ) -> bool:
-    """Log eval metrics, tables, and artifacts to W&B."""
+    """Log eval metrics and, for test runs only, W&B tables."""
     if run is None or wandb is None:
         return False
 
@@ -720,28 +730,16 @@ def log_eval_outputs_to_wandb(
     if metrics_to_log:
         wandb.log(metrics_to_log)
 
-    summary_row = build_eval_summary_row(args, run_summary, metrics_summary)
-    summary_table = build_wandb_table([summary_row])
-    if summary_table is not None:
-        wandb.log({"eval_summary": summary_table})
+    if should_log_eval_tables(args):
+        summary_row = build_eval_summary_row(args, run_summary, metrics_summary)
+        summary_table = build_wandb_table([summary_row])
+        if summary_table is not None:
+            wandb.log({"eval_summary": summary_table})
 
-    sample_table = build_wandb_table(sample_rows)
-    if sample_table is not None:
-        wandb.log({"eval_samples": sample_table})
+        sample_table = build_wandb_table(sample_rows)
+        if sample_table is not None:
+            wandb.log({"eval_samples": sample_table})
 
-    artifact_name = getattr(args, "wandb_artifact_name", None) or f"eval-results-{resolve_model_name(args)}-{args.eval_split}"
-    artifact_name = artifact_name.replace("/", "-").replace(" ", "-")
-    artifact = wandb.Artifact(
-        artifact_name,
-        type="evaluation",
-        metadata={
-            "job_type": "eval",
-            "eval_split": args.eval_split,
-            "benchmark_version": resolve_benchmark_version(args),
-        },
-    )
-    artifact.add_dir(args.evals_path)
-    run.log_artifact(artifact)
     return True
 
 
@@ -752,6 +750,8 @@ def maybe_log_eval_to_weave(
     sample_rows: List[Dict[str, Any]],
 ) -> bool:
     """Track eval rows with Weave Evaluation when configured."""
+    if not should_run_weave_evaluation(args):
+        return False
     if weave is None or not sample_rows:
         return False
 

@@ -764,7 +764,7 @@ class EvalContractTests(unittest.TestCase):
         self.assertEqual(EVAL.wandb.init_calls[0]["job_type"], "eval")
         self.assertEqual(EVAL.wandb.init_calls[0]["config"]["benchmark_version"], "disease_temporal_hc_reasoning_v1")
         self.assertTrue(EVAL.wandb.last_run.finished)
-        self.assertEqual(EVAL.wandb.last_run.artifacts[0].added_dirs, [tmpdir])
+        self.assertEqual(EVAL.wandb.last_run.artifacts, [])
         self.assertTrue(any("fmax_mf" in payload for payload in EVAL.wandb.logged_payloads))
         self.assertTrue(any("eval_summary" in payload for payload in EVAL.wandb.logged_payloads))
         self.assertTrue(any("eval_samples" in payload for payload in EVAL.wandb.logged_payloads))
@@ -772,6 +772,57 @@ class EvalContractTests(unittest.TestCase):
         self.assertEqual(EVAL.weave.init_calls[0], "demo-entity/bioreason-pro")
         self.assertEqual(len(EVAL.weave.Evaluation.instances), 1)
         self.assertEqual(len(EVAL.weave.Evaluation.instances[0].dataset), 1)
+
+    def test_log_eval_tracking_logs_metrics_only_for_validation(self):
+        EVAL.wandb.init_calls.clear()
+        EVAL.wandb.logged_payloads.clear()
+        EVAL.wandb.last_run = None
+        EVAL.weave.init_calls.clear()
+        EVAL.weave.Evaluation.instances.clear()
+
+        result_rows = [
+            {
+                "protein_id": "P54321",
+                "go_aspect": "biological_process",
+                "success": True,
+                "input_prompt": "prompt",
+                "ground_truth": "<think>gold trace</think>\nGO:0002222",
+                "generated_response": "<think>model trace</think>\nGO:0002222",
+                "sequence_length": 111,
+            }
+        ]
+        run_summary = {
+            "job_type": "eval",
+            "loaded_samples": 1,
+            "newly_processed_samples": 1,
+            "result_files_total": 1,
+            "unique_sample_keys_total": 1,
+            "successful_result_files_total": 1,
+        }
+
+        args = make_eval_args(
+            eval_split="validation",
+            model_name="BioReason-Pro-RL-Paper",
+            wandb_project="bioreason-pro",
+            wandb_entity="demo-entity",
+            weave_project="demo-entity/bioreason-pro",
+        )
+
+        tracking_status = EVAL.log_eval_tracking(
+            args,
+            run_summary,
+            result_rows,
+            metrics_summary={"fmax_mf": 0.5, "fmax_bp": 0.4, "fmax_cc": 0.3},
+        )
+
+        self.assertTrue(tracking_status["wandb_logged"])
+        self.assertFalse(tracking_status["weave_logged"])
+        self.assertTrue(any("fmax_mf" in payload for payload in EVAL.wandb.logged_payloads))
+        self.assertFalse(any("eval_summary" in payload for payload in EVAL.wandb.logged_payloads))
+        self.assertFalse(any("eval_samples" in payload for payload in EVAL.wandb.logged_payloads))
+        self.assertEqual(EVAL.wandb.last_run.artifacts, [])
+        self.assertEqual(EVAL.weave.init_calls, [])
+        self.assertEqual(EVAL.weave.Evaluation.instances, [])
 
     def test_maybe_cleanup_local_eval_outputs_removes_scratch_after_wandb_logging(self):
         with tempfile.TemporaryDirectory() as tmpdir:

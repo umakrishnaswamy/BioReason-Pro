@@ -331,15 +331,17 @@ srun \
 
 ### 3.4 評価で W&B に保存されるもの
 
-各 eval run では次を W&B に保存する。
+`validation` run では metric のみを W&B に保存する。
 
 - `fmax_mf`
 - `fmax_bp`
 - `fmax_cc`
 - `overall_mean_fmax`
+
+`test` run では次も追加で保存する。
+
 - `eval_summary` table
 - `eval_samples` table
-- JSON / summary / sample export artifact
 - Weave evaluation record
 
 local eval 出力は scratch とみなし、W&B 保存成功後は既定で cleanup される。  

@@ -26,14 +26,14 @@
 | reasoning dataset 作成 | 完了 | `wandb-healthcare/bioreason-pro-custom/disease-temporal-reasoning:production` |
 | comparison model artifact 確定 | 完了 | `wandb-healthcare/bioreason-pro-custom/bioreason-pro-rl:production` |
 | CoreWeave 実行フロー整理 | 完了 | `srun` ベースの実行、remote env、artifact 解決、1-sample smoke まで確認済み |
-| comparison model の validation 評価 | 実行中 | `comparison-family` の `validation` run を CoreWeave で実行中 |
-| SFT | 未着手 | wrapper と tracking は用意済み、run は未実施 |
+| comparison model の validation 評価 | 再実行待ち | 評価仕様変更に合わせて metrics-only run へ切り替え、再実行する |
+| SFT | 実行中 | `stage 2 only` の SFT run を CoreWeave で実行中 |
 | RL | 準備済み | `train_protein_grpo.py` と `scripts/sh_train_protein_grpo.sh` は実装済み、run は未実施 |
 
 ### 0.3 いま次にやること
 
-次の実行対象は **実行中の `comparison-family` validation を完走させ、W&B 上の結果を確認すること** である。  
-その後、SFT に進む。
+次の実行対象は **`comparison-family` validation を新仕様で再実行し、並行して `stage 2 only` SFT の進捗を確認すること** である。  
+その後、validation metric を確認して RL に進む。
 
 ## 1. データの準備
 
@@ -170,11 +170,12 @@ cp configs/disease_benchmark/wandb_asset_sources.env.example \
 
 ## 3. 比較モデルの評価
 
-状態: **実行中**
+状態: **再実行待ち**
 
 ### 3.1 目的
 
-独自 tuning 前の比較モデル `bioreason-pro-rl-paper` を、現在採用している benchmark 上で `validation` split で評価する。
+独自 tuning 前の比較モデル `bioreason-pro-rl-paper` を、現在採用している benchmark 上で `validation` split で評価する。  
+このフェーズでは **metrics のみ** を W&B に残し、table や eval artifact は要求しない。
 
 ### 3.2 評価対象
 
@@ -215,11 +216,8 @@ W&B 上に次が見えていれば完了とする。
 - `fmax_bp`
 - `fmax_cc`
 - `overall_mean_fmax`
-- `eval_summary` table
-- `eval_samples` table
-- eval artifact
 
-2026-04-07 現在、CoreWeave SUNK 上で `comparison-family` の `validation` run を実行中である。
+validation run では metrics が保存されていれば十分であり、`eval_summary` table、`eval_samples` table、eval artifact は要求しない。
 
 ### 3.5 このフェーズが終わったらやること
 
@@ -228,7 +226,7 @@ W&B 上に次が見えていれば完了とする。
 
 ## 4. SFT
 
-状態: **未着手**
+状態: **実行中**
 
 ### 4.1 目的
 
@@ -360,9 +358,12 @@ srun \
 W&B 上に次が揃っていれば完了とする。
 
 - comparison model と tuned model の `test` 指標
+- `fmax_mf`
+- `fmax_bp`
+- `fmax_cc`
 - `eval_summary` table
 - `eval_samples` table
-- 最終 eval artifact
+- Weave Evaluation
 
 ## 7. 次アクション
 
