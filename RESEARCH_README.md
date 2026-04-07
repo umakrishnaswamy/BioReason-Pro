@@ -101,12 +101,8 @@ repo 内の JSON は artifact そのものではなく、**ユーザーが W&B A
 | `BIOREASON_COMPARISON_REASONING_DATASET_REGISTRY_PATH` | 214-start comparison variant の reasoning dataset | `wandb-healthcare/bioreason-pro-custom/disease-temporal-reasoning:214.221.225.228` |
 | `BIOREASON_RL_PAPER_MODEL_REGISTRY_PATH` | tuning 前の比較モデル | `wandb-healthcare/bioreason-pro-custom/bioreason-pro-rl:production` |
 
-未設定の ref は次である。
-
-| env var | 用途 | 状態 |
-|---|---|---|
-| `BIOREASON_TRAIN_SFT_MODEL_REGISTRY_PATH` | custom `train_sft` output artifact | 未設定 |
-| `BIOREASON_TRAIN_RL_MODEL_REGISTRY_PATH` | custom `train_rl` output artifact | 未設定 |
+初期セットアップで人が明示的に用意する model ref は、現時点では **`BIOREASON_RL_PAPER_MODEL_REGISTRY_PATH` だけ**でよい。  
+`train_sft` / `train_rl` の output artifact ref は、将来その run を実行したあとに成果物として決まるものであり、この段階で先に埋める前提にはしない。
 
 公開 checkpoint は、まず一度 Hugging Face から materialize し、その後 **W&B model artifact に publish** して使う。  
 private / internal checkpoint と dataset は、**貼り付けた W&B Artifact ref** から取得する。  
@@ -364,8 +360,8 @@ srun \
 スペシフィケーションに沿って、比較対象は次の 3 系統に固定する。
 
 - `bioreason-pro-rl-paper`: 独自 tuning 前の比較モデルとして評価する
-- `train_sft` output: custom SFT 後の出力を評価する
-- `train_rl` output: custom RL 後の出力を評価する
+- `train-sft-output`: custom `train_sft` run の output artifact を評価する
+- `train-rl-output`: custom `train_rl` run の output artifact を評価する
 
 manifest 上の target group は次を使う。
 

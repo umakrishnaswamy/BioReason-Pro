@@ -48,8 +48,11 @@ Status:
 | 手法 | 位置づけ |
 |---|---|
 | bioreason-pro-rl-paper | 独自 tuning 前の比較モデル |
-| train_sft output | reasoning dataset で追加学習したモデル |
-| train_rl output | SFT 後に RL で最適化したモデル |
+| train-sft-output | custom `train_sft` run が生成する output artifact |
+| train-rl-output | custom `train_rl` run が生成する output artifact |
+
+初期状態で先に必要な比較モデル artifact ref は `bioreason-pro-rl-paper` だけでよい。  
+`train-sft-output` と `train-rl-output` は、それぞれの学習 run を実行したあとに成果物として現れる比較対象である。
 
 ## 3. ベンチマーク
 
@@ -453,8 +456,8 @@ CoreWeave では login node から Slurm job を submit して評価を回し、
 評価対象:
 
 - `bioreason-pro-rl-paper`
-- `train_sft` の出力
-- `train_rl` の出力がある場合はそれも含める
+- `train-sft-output`
+- `train-rl-output` がある場合はそれも含める
 
 運用上の target family は次の 3 つに分ける。
 
