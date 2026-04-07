@@ -270,6 +270,11 @@ def make_eval_args(**overrides):
         dev_end_release=None,
         test_end_release=None,
         metrics_summary_path=None,
+        ia_file_path=None,
+        metric_threads=0,
+        metric_threshold_step=0.99,
+        metrics_final_answer_only=True,
+        reasoning_metrics_mode=None,
         wandb_project=None,
         wandb_entity=None,
         wandb_run_name=None,
@@ -437,6 +442,141 @@ class EvalContractTests(unittest.TestCase):
             payload = json.loads(error_path.read_text(encoding="utf-8"))
             self.assertEqual(payload[0]["protein_id"], "P12345")
             self.assertEqual(payload[0]["error_message"], "boom")
+
+    def test_maybe_compute_metrics_summary_runs_cafa_pipeline(self):
+        class FakeFrame:
+            def __init__(self, label):
+                self.label = label
+
+            def to_csv(self, path, sep="\t"):
+                Path(path).write_text(self.label, encoding="utf-8")
+
+        calls = {}
+
+        def process_json_data(base_dir, reasoning_mode=False, final_answer_only=False, go_dag=None):
+            calls["process_json_data"] = {
+                "base_dir": base_dir,
+                "reasoning_mode": reasoning_mode,
+                "final_answer_only": final_answer_only,
+            }
+            return [("P12345", {"GO:0001111"})], [("P12345", {"GO:0001111"})]
+
+        def create_cafa_prediction_file(predictions, output_path):
+            calls["prediction_file"] = output_path
+            Path(output_path).write_text("predictions", encoding="utf-8")
+
+        def create_cafa_ground_truth_file(ground_truth, output_path):
+            calls["ground_truth_file"] = output_path
+            Path(output_path).write_text("ground_truth", encoding="utf-8")
+
+        def run_cafa_evaluation(ontology_path, predictions_dir, ground_truth_path, ia_file_path=None, n_cpu=0, th_step=0.99):
+            calls["run_cafa_evaluation"] = {
+                "ontology_path": ontology_path,
+                "predictions_dir": predictions_dir,
+                "ground_truth_path": ground_truth_path,
+                "ia_file_path": ia_file_path,
+                "n_cpu": n_cpu,
+                "th_step": th_step,
+            }
+            return FakeFrame("evaluation"), {"f": FakeFrame("best-f"), "f_w": FakeFrame("best-fw")}
+
+        def extract_metrics_summary(results):
+            calls["extract_metrics_summary"] = True
+            return {
+                "molecular_function_f1": 0.9,
+                "biological_process_f1": 0.2,
+                "cellular_component_f1": 0.7,
+            }
+
+        def write_metrics_summary(metrics, output_dir):
+            calls["metrics_output_dir"] = output_dir
+            output_path = Path(output_dir) / "metrics_summary.json"
+            output_path.write_text(json.dumps(metrics), encoding="utf-8")
+            return str(output_path)
+
+        fake_cafa_module = types.SimpleNamespace(
+            process_json_data=process_json_data,
+            create_cafa_prediction_file=create_cafa_prediction_file,
+            create_cafa_ground_truth_file=create_cafa_ground_truth_file,
+            run_cafa_evaluation=run_cafa_evaluation,
+            extract_metrics_summary=extract_metrics_summary,
+            write_metrics_summary=write_metrics_summary,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ia_path = Path(tmpdir) / "IA.txt"
+            ia_path.write_text("ia", encoding="utf-8")
+            go_obo_path = Path(tmpdir) / "go-basic.obo"
+            go_obo_path.write_text("obo", encoding="utf-8")
+
+            args = make_eval_args(
+                evals_path=tmpdir,
+                go_obo_path=str(go_obo_path),
+                ia_file_path=str(ia_path),
+                metric_threads=4,
+                metric_threshold_step=0.95,
+            )
+
+            with mock.patch.object(EVAL.importlib, "import_module", return_value=fake_cafa_module):
+                metrics_summary, metrics_summary_path = EVAL.maybe_compute_metrics_summary(args)
+
+            self.assertEqual(metrics_summary["fmax_mf"], 0.9)
+            self.assertTrue(metrics_summary_path.endswith("metrics_summary.json"))
+            self.assertTrue(Path(metrics_summary_path).exists())
+            self.assertEqual(calls["process_json_data"]["base_dir"], tmpdir)
+            self.assertTrue(calls["process_json_data"]["reasoning_mode"])
+            self.assertTrue(calls["process_json_data"]["final_answer_only"])
+            self.assertEqual(calls["run_cafa_evaluation"]["ia_file_path"], str(ia_path))
+            self.assertEqual(calls["run_cafa_evaluation"]["n_cpu"], 4)
+            self.assertEqual(calls["run_cafa_evaluation"]["th_step"], 0.95)
+
+    def test_maybe_compute_metrics_summary_skips_when_required_files_are_missing(self):
+        args = make_eval_args(
+            go_obo_path="/tmp/does-not-exist.obo",
+            ia_file_path="/tmp/does-not-exist.ia",
+        )
+
+        with mock.patch.object(EVAL.importlib, "import_module") as import_module:
+            metrics_summary, metrics_summary_path = EVAL.maybe_compute_metrics_summary(args)
+
+        self.assertEqual(metrics_summary, {})
+        self.assertIsNone(metrics_summary_path)
+        import_module.assert_not_called()
+
+    def test_maybe_compute_metrics_summary_recovers_from_cafa_errors(self):
+        def process_json_data(*args, **kwargs):
+            return [("P12345", {"GO:0001111"})], [("P12345", {"GO:0001111"})]
+
+        fake_cafa_module = types.SimpleNamespace(
+            process_json_data=process_json_data,
+            create_cafa_prediction_file=lambda predictions, output_path: Path(output_path).write_text(
+                "predictions", encoding="utf-8"
+            ),
+            create_cafa_ground_truth_file=lambda ground_truth, output_path: Path(output_path).write_text(
+                "ground_truth", encoding="utf-8"
+            ),
+            run_cafa_evaluation=lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+            extract_metrics_summary=lambda results: {},
+            write_metrics_summary=lambda metrics, output_dir: str(Path(output_dir) / "metrics_summary.json"),
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ia_path = Path(tmpdir) / "IA.txt"
+            ia_path.write_text("ia", encoding="utf-8")
+            go_obo_path = Path(tmpdir) / "go-basic.obo"
+            go_obo_path.write_text("obo", encoding="utf-8")
+
+            args = make_eval_args(
+                evals_path=tmpdir,
+                go_obo_path=str(go_obo_path),
+                ia_file_path=str(ia_path),
+            )
+
+            with mock.patch.object(EVAL.importlib, "import_module", return_value=fake_cafa_module):
+                metrics_summary, metrics_summary_path = EVAL.maybe_compute_metrics_summary(args)
+
+        self.assertEqual(metrics_summary, {})
+        self.assertIsNone(metrics_summary_path)
 
     def test_log_eval_tracking_uses_optional_wandb_and_weave(self):
         EVAL.wandb.init_calls.clear()

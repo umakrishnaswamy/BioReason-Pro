@@ -397,6 +397,7 @@ srun \
 
 - `MODEL_PATH`
 - `GO_OBO_PATH`
+- `IA_FILE_PATH`
 - `GO_EMBEDDINGS_PATH`
 - `DATASET_CACHE_DIR`
 - `STRUCTURE_DIR`
@@ -424,6 +425,7 @@ mkdir -p data/artifacts/eval/base/validation
 EVALS_DIR="data/artifacts/eval/base" \
 MODEL_PATH="/path/to/bioreason-pro-base" \
 GO_OBO_PATH="/path/to/go-basic.obo" \
+IA_FILE_PATH="/path/to/IA.txt" \
 GO_EMBEDDINGS_PATH="/path/to/go-embeddings" \
 DATASET_CACHE_DIR="/path/to/hf-cache" \
 STRUCTURE_DIR="/path/to/structures" \
@@ -452,6 +454,7 @@ mkdir -p data/artifacts/eval/sft/test
 EVALS_DIR="data/artifacts/eval/sft" \
 MODEL_PATH="/path/to/bioreason-pro-sft" \
 GO_OBO_PATH="/path/to/go-basic.obo" \
+IA_FILE_PATH="/path/to/IA.txt" \
 GO_EMBEDDINGS_PATH="/path/to/go-embeddings" \
 DATASET_CACHE_DIR="/path/to/hf-cache" \
 STRUCTURE_DIR="/path/to/structures" \
@@ -480,6 +483,7 @@ mkdir -p data/artifacts/eval/rl/test
 EVALS_DIR="data/artifacts/eval/rl" \
 MODEL_PATH="/path/to/bioreason-pro-rl" \
 GO_OBO_PATH="/path/to/go-basic.obo" \
+IA_FILE_PATH="/path/to/IA.txt" \
 GO_EMBEDDINGS_PATH="/path/to/go-embeddings" \
 DATASET_CACHE_DIR="/path/to/hf-cache" \
 STRUCTURE_DIR="/path/to/structures" \
@@ -497,49 +501,34 @@ WEAVE_EVAL_NAME="eval-rl-test-213.221.225.228" \
 bash scripts/sh_eval.sh
 ```
 
-### 3.5 F_max を集計する
+### 3.5 各 eval run で自動保存されるもの
 
-各評価ディレクトリについて、個別 JSON を出したあとに CAFA metric を集計する。
+F_max は **各 eval run の中で自動計算され、そのまま W&B に保存される**。  
+別ステップで `evals/cafa_evals.py` を手で回す想定ではない。
 
-```bash
-cd ~/BioReason-Pro
-source .venv-gpu/bin/activate
+前提として、eval 実行時に `GO_OBO_PATH` と `IA_FILE_PATH` が正しく設定されている必要がある。  
+この 2 つが無い場合、eval run 自体は継続するが、F_max は W&B に出ない。
 
-uv run --active python evals/cafa_evals.py \
-  --input_dir data/artifacts/eval/sft/results \
-  --ontology /path/to/go-basic.obo \
-  --ia_file /path/to/IA.txt \
-  --output_dir data/artifacts/eval/sft/cafa_metrics \
-  --reasoning_mode True \
-  --final_answer_only True
-```
+確認先は次の 2 つ。
 
-その後、必要なら `METRICS_SUMMARY_PATH` を渡して再度 eval tracking を行う。
+- W&B run page
+- `data/artifacts/eval/<model>/results/cafa_metrics/metrics_summary.json`
 
-```bash
-cd ~/BioReason-Pro
-source .venv-gpu/bin/activate
+W&B では少なくとも次が見えていることを確認する。
 
-EVALS_DIR="data/artifacts/eval/sft" \
-MODEL_PATH="/path/to/bioreason-pro-sft" \
-GO_OBO_PATH="/path/to/go-basic.obo" \
-GO_EMBEDDINGS_PATH="/path/to/go-embeddings" \
-DATASET_CACHE_DIR="/path/to/hf-cache" \
-STRUCTURE_DIR="/path/to/structures" \
-DATASET_NAME="disease_temporal_hc_reasoning_v1" \
-REASONING_DATASET_NAME="disease_temporal_hc_reasoning_v1" \
-EVAL_SPLIT=test \
-BENCHMARK_VERSION="213 -> 221 -> 225 -> 228" \
-MODEL_NAME="bioreason-pro-sft" \
-METRICS_SUMMARY_PATH="data/artifacts/eval/sft/cafa_metrics/metrics_summary.json" \
-WANDB_PROJECT="bioreason-pro-disease-benchmark" \
-WANDB_ENTITY="<your-entity>" \
-WANDB_RUN_NAME="eval-sft-test-213.221.225.228-with-metrics" \
-WANDB_ARTIFACT_NAME="eval-sft-test-213.221.225.228-artifacts" \
-WEAVE_PROJECT="<your-entity>/bioreason-pro-disease-benchmark" \
-WEAVE_EVAL_NAME="eval-sft-test-213.221.225.228-with-metrics" \
-bash scripts/sh_eval.sh
-```
+- `fmax_mf`
+- `fmax_bp`
+- `fmax_cc`
+- `overall_mean_fmax`
+- `eval_summary` table
+- `eval_samples` table
+
+ローカル出力としては、各 eval run の中で自動的に次が作られる。
+
+- `data/artifacts/eval/<model>/results/*.json`
+- `data/artifacts/eval/<model>/results/sample_results.tsv`
+- `data/artifacts/eval/<model>/results/run_summary.json`
+- `data/artifacts/eval/<model>/results/cafa_metrics/metrics_summary.json`
 
 ## 4. SFT
 

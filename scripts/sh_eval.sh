@@ -56,6 +56,7 @@ MODEL_PATH=${MODEL_PATH:-"/path/to/bioreason-pro-rl"}
 # ===================================================================================================
 PROTEIN_MODEL_NAME=${PROTEIN_MODEL_NAME:-"esm3_sm_open_v1"}
 GO_OBO_PATH=${GO_OBO_PATH:-""}                      # e.g., /path/to/go-basic.obo
+IA_FILE_PATH=${IA_FILE_PATH:-""}                   # e.g., /path/to/IA.txt
 GO_EMBEDDINGS_PATH=${GO_EMBEDDINGS_PATH:-""}       # e.g., /data/bioreason/go_embeddings
 DATASET_CACHE_DIR=${DATASET_CACHE_DIR:-""}         # e.g., /data/bioreason/data
 STRUCTURE_DIR=${STRUCTURE_DIR:-""}                 # e.g., /data/bioreason/structures
@@ -106,6 +107,7 @@ EVAL_SPLIT=${EVAL_SPLIT:-validation}
 BENCHMARK_VERSION=${BENCHMARK_VERSION:-}
 MODEL_NAME=${MODEL_NAME:-}
 METRICS_SUMMARY_PATH=${METRICS_SUMMARY_PATH:-}
+METRIC_THREADS=${METRIC_THREADS:-0}
 WANDB_PROJECT=${WANDB_PROJECT:-}
 WANDB_ENTITY=${WANDB_ENTITY:-}
 WANDB_RUN_NAME=${WANDB_RUN_NAME:-}
@@ -168,6 +170,7 @@ python "$EVAL_SCRIPT" \
     --protein_model_name "$PROTEIN_MODEL_NAME" \
     --protein_embedding_layer "$PROTEIN_EMBEDDING_LAYER" \
     --go_obo_path "$GO_OBO_PATH" \
+    --ia_file_path "$IA_FILE_PATH" \
     --precomputed_embeddings_path "$GO_EMBEDDINGS_PATH" \
     --unified_go_encoder "$UNIFIED_GO_ENCODER" \
     --go_hidden_dim $GO_HIDDEN_DIM \
@@ -192,6 +195,7 @@ python "$EVAL_SCRIPT" \
     --apply_go_filtering_to_val_test $APPLY_GO_FILTERING_TO_VAL_TEST \
     --seed 23 \
     --debug False \
+    --metric_threads $METRIC_THREADS \
     --eval_split "$EVAL_SPLIT" \
     --max_samples $MAX_SAMPLES \
     --max_length_protein $MAX_LENGTH_PROTEIN \

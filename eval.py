@@ -16,8 +16,10 @@ Usage:
 
 import argparse
 import csv
+import importlib
 import json
 import os
+import shutil
 import time
 from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Tuple
@@ -449,6 +451,88 @@ def load_metrics_summary(metrics_summary_path: Optional[str]) -> Dict[str, Any]:
     return normalize_metrics_summary(payload)
 
 
+def maybe_compute_metrics_summary(args) -> Tuple[Dict[str, Any], Optional[str]]:
+    """Compute Fmax metrics from eval outputs when an IA file is available."""
+    metrics_summary_path = getattr(args, "metrics_summary_path", None)
+    if metrics_summary_path:
+        loaded_metrics = load_metrics_summary(metrics_summary_path)
+        return loaded_metrics, (metrics_summary_path if loaded_metrics else None)
+
+    go_obo_path = getattr(args, "go_obo_path", None)
+    if not go_obo_path:
+        print("⚠️  GO OBO path not provided; skipping automatic Fmax computation.")
+        return {}, None
+    if not os.path.exists(go_obo_path):
+        print(f"⚠️  GO OBO file not found; skipping automatic Fmax computation: {go_obo_path}")
+        return {}, None
+
+    ia_file_path = getattr(args, "ia_file_path", None)
+    if not ia_file_path:
+        print("⚠️  IA file path not provided; skipping automatic Fmax computation.")
+        return {}, None
+    if not os.path.exists(ia_file_path):
+        print(f"⚠️  IA file not found; skipping automatic Fmax computation: {ia_file_path}")
+        return {}, None
+
+    try:
+        cafa_metrics = importlib.import_module("evals.cafa_evals")
+    except Exception as exc:  # pragma: no cover - import failure is runtime-specific
+        print(f"⚠️  Failed to import evals.cafa_evals; skipping automatic Fmax computation: {exc}")
+        return {}, None
+
+    reasoning_mode = getattr(args, "reasoning_metrics_mode", None)
+    if reasoning_mode is None:
+        reasoning_mode = bool(getattr(args, "reasoning_dataset_name", None))
+
+    metrics_output_dir = os.path.join(args.evals_path, "cafa_metrics")
+
+    try:
+        if os.path.exists(metrics_output_dir):
+            shutil.rmtree(metrics_output_dir)
+        os.makedirs(metrics_output_dir, exist_ok=True)
+
+        predictions, ground_truth = cafa_metrics.process_json_data(
+            args.evals_path,
+            reasoning_mode=reasoning_mode,
+            final_answer_only=getattr(args, "metrics_final_answer_only", True),
+            go_dag=None,
+        )
+        if not predictions or not ground_truth:
+            print("⚠️  Could not derive predictions/ground truth for Fmax computation.")
+            return {}, None
+
+        predictions_dir = os.path.join(metrics_output_dir, "predictions")
+        os.makedirs(predictions_dir, exist_ok=True)
+        prediction_file = os.path.join(predictions_dir, "llm_predictions.tsv")
+        ground_truth_file = os.path.join(metrics_output_dir, "ground_truth.tsv")
+
+        cafa_metrics.create_cafa_prediction_file(predictions, prediction_file)
+        cafa_metrics.create_cafa_ground_truth_file(ground_truth, ground_truth_file)
+
+        results = cafa_metrics.run_cafa_evaluation(
+            go_obo_path,
+            predictions_dir,
+            ground_truth_file,
+            ia_file_path=ia_file_path,
+            n_cpu=getattr(args, "metric_threads", 0),
+            th_step=getattr(args, "metric_threshold_step", 0.99),
+        )
+
+        metrics_summary = normalize_metrics_summary(cafa_metrics.extract_metrics_summary(results))
+        metrics_summary_path = cafa_metrics.write_metrics_summary(metrics_summary, metrics_output_dir)
+
+        evaluation_df, best_scores_dict = results
+        evaluation_df.to_csv(os.path.join(metrics_output_dir, "evaluation_results.tsv"), sep="\t")
+        for metric_name, metric_df in best_scores_dict.items():
+            metric_df.to_csv(os.path.join(metrics_output_dir, f"best_{metric_name}.tsv"), sep="\t")
+
+        print(f"📈 Automatic Fmax metrics saved to: {metrics_summary_path}")
+        return metrics_summary, metrics_summary_path
+    except Exception as exc:
+        print(f"⚠️  Automatic Fmax computation failed; continuing without Fmax metrics: {exc}")
+        return {}, None
+
+
 def resolve_model_name(args) -> str:
     """Resolve a stable model name for tracking outputs."""
     explicit_name = getattr(args, "model_name", None)
@@ -510,7 +594,7 @@ def build_tracking_config(args, run_summary: Dict[str, Any], metrics_summary: Di
         "eval_split": args.eval_split,
         "pass_at_k": args.pass_at_k,
         "max_samples": args.max_samples,
-        "metrics_summary_path": getattr(args, "metrics_summary_path", None),
+        "metrics_summary_path": run_summary.get("metrics_summary_path") or getattr(args, "metrics_summary_path", None),
         "result_files_total": run_summary.get("result_files_total"),
         "unique_sample_keys_total": run_summary.get("unique_sample_keys_total"),
         "successful_result_files_total": run_summary.get("successful_result_files_total"),
@@ -729,9 +813,11 @@ def log_eval_tracking(
     args,
     run_summary: Dict[str, Any],
     result_rows: List[Dict[str, Any]],
+    metrics_summary: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Log optional W&B / Weave tracking for the completed eval run."""
-    metrics_summary = load_metrics_summary(getattr(args, "metrics_summary_path", None))
+    if metrics_summary is None:
+        metrics_summary = load_metrics_summary(getattr(args, "metrics_summary_path", None))
     sample_rows = build_sample_table_rows(args, result_rows)
     tracking_status = {
         "metrics_loaded": bool(metrics_summary),
@@ -979,6 +1065,7 @@ def run_local_inference(args):
         result_rows = collect_result_rows(args.evals_path)
         sample_rows = build_sample_table_rows(args, result_rows)
         sample_table_path = write_sample_results_table(sample_rows, args.evals_path)
+        metrics_summary, metrics_summary_path = maybe_compute_metrics_summary(args)
         run_summary = build_run_summary(
             args=args,
             loaded_samples=loaded_samples,
@@ -987,7 +1074,9 @@ def run_local_inference(args):
             total_time=dt,
             result_rows=result_rows,
         )
-        tracking_status = log_eval_tracking(args, run_summary, result_rows)
+        if metrics_summary_path:
+            run_summary["metrics_summary_path"] = metrics_summary_path
+        tracking_status = log_eval_tracking(args, run_summary, result_rows, metrics_summary=metrics_summary)
         run_summary.update(tracking_status)
         summary_path = write_run_summary(run_summary, args.evals_path)
         print(f"🧾 Sample-level TSV saved to: {sample_table_path}")
@@ -1169,6 +1258,16 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     tracking_group.add_argument("--dev_end_release", type=str, default=None)
     tracking_group.add_argument("--test_end_release", type=str, default=None)
     tracking_group.add_argument("--metrics_summary_path", type=str, default=None)
+    tracking_group.add_argument("--ia_file_path", type=str, default=None)
+    tracking_group.add_argument("--metric_threads", type=int, default=0)
+    tracking_group.add_argument("--metric_threshold_step", type=float, default=0.99)
+    tracking_group.add_argument("--metrics_final_answer_only", type=str2bool, default=True)
+    tracking_group.add_argument(
+        "--reasoning_metrics_mode",
+        type=str2bool,
+        default=None,
+        help="Override reasoning-mode metric extraction. If omitted, infer from reasoning_dataset_name.",
+    )
     tracking_group.add_argument("--wandb_project", type=str, default=None)
     tracking_group.add_argument("--wandb_entity", type=str, default=None)
     tracking_group.add_argument("--wandb_run_name", type=str, default=None)
