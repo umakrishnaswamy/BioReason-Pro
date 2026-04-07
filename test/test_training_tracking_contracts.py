@@ -1,16 +1,26 @@
+import importlib.util
+import sys
 import tempfile
 import types
 import unittest
+from pathlib import Path
 
-from bioreason2.utils.tracking import (
-    SFT_SAMPLE_TABLE_COLUMNS,
-    build_checkpoint_artifact_metadata,
-    build_sft_sample_row,
-    build_training_tracking_config,
-    maybe_log_directory_artifact,
-    parse_artifact_aliases,
-    sync_run_config,
-)
+
+ROOT = Path(__file__).resolve().parents[1]
+TRACKING_PATH = ROOT / "bioreason2" / "utils" / "tracking.py"
+
+
+def load_tracking_module():
+    module_name = "training_tracking_contracts_test_module"
+    spec = importlib.util.spec_from_file_location(module_name, TRACKING_PATH)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+TRACKING = load_tracking_module()
 
 
 class FakeConfig(dict):
@@ -46,7 +56,7 @@ class TrainingTrackingContractsTest(unittest.TestCase):
         args = types.SimpleNamespace(
             wandb_job_type="train_sft",
             benchmark_version="213 -> 221 -> 225 -> 228",
-            step0_artifact="domain/specification/busiless-rules/artifacts/step0_human_ub_20260406",
+            temporal_split_artifact="data/artifacts/benchmarks/213_221_225_228/temporal_split",
             dataset_config=None,
             reasoning_dataset_config=None,
             dataset_artifact="disease_temporal_hc_reasoning_v1:latest",
@@ -73,10 +83,14 @@ class TrainingTrackingContractsTest(unittest.TestCase):
             projector_checkpoint_path=None,
         )
 
-        config = build_training_tracking_config(args, run_name="demo-run")
+        config = TRACKING.build_training_tracking_config(args, run_name="demo-run")
 
         self.assertEqual(config["job_type"], "train_sft")
         self.assertEqual(config["benchmark_version"], "213 -> 221 -> 225 -> 228")
+        self.assertEqual(
+            config["temporal_split_artifact"],
+            "data/artifacts/benchmarks/213_221_225_228/temporal_split",
+        )
         self.assertEqual(config["dataset_config"], "disease_temporal_hc_v1")
         self.assertEqual(config["reasoning_dataset_config"], "disease_temporal_hc_reasoning_v1")
         self.assertEqual(config["dataset_artifact"], "disease_temporal_hc_reasoning_v1:latest")
@@ -98,9 +112,9 @@ class TrainingTrackingContractsTest(unittest.TestCase):
             "ground_truth": "GO:0007165",
         }
 
-        row = build_sft_sample_row(batch=batch, prefix="val", result=result)
+        row = TRACKING.build_sft_sample_row(batch=batch, prefix="val", result=result)
 
-        self.assertEqual(set(row.keys()), set(SFT_SAMPLE_TABLE_COLUMNS))
+        self.assertEqual(set(row.keys()), set(TRACKING.SFT_SAMPLE_TABLE_COLUMNS))
         self.assertEqual(row["protein_id"], "P12345")
         self.assertEqual(row["split"], "validation")
         self.assertEqual(row["reasoning"], "Mutant signaling is impaired.")
@@ -111,7 +125,7 @@ class TrainingTrackingContractsTest(unittest.TestCase):
 
     def test_sync_run_config_updates_existing_run(self):
         run = FakeRun()
-        applied = sync_run_config(run, {"job_type": "train_sft", "benchmark_version": "demo"})
+        applied = TRACKING.sync_run_config(run, {"job_type": "train_sft", "benchmark_version": "demo"})
 
         self.assertTrue(applied)
         self.assertEqual(run.config["job_type"], "train_sft")
@@ -123,13 +137,13 @@ class TrainingTrackingContractsTest(unittest.TestCase):
         fake_wandb = types.SimpleNamespace(Artifact=FakeArtifact)
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            metadata = build_checkpoint_artifact_metadata(
+            metadata = TRACKING.build_checkpoint_artifact_metadata(
                 types.SimpleNamespace(checkpoint_dir=tmpdir, training_stage=2),
                 run_name="demo-run",
                 tracking_config={"benchmark_version": "213 -> 221 -> 225 -> 228"},
             )
 
-            status = maybe_log_directory_artifact(
+            status = TRACKING.maybe_log_directory_artifact(
                 run=run,
                 wandb_module=fake_wandb,
                 artifact_name="demo-checkpoints",
@@ -147,7 +161,7 @@ class TrainingTrackingContractsTest(unittest.TestCase):
         self.assertEqual(run.artifacts[0].metadata["run_name"], "demo-run")
 
     def test_parse_artifact_aliases_deduplicates(self):
-        aliases = parse_artifact_aliases("latest, best,latest")
+        aliases = TRACKING.parse_artifact_aliases("latest, best,latest")
         self.assertEqual(aliases, ["latest", "best"])
 
 

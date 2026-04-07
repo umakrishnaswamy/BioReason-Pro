@@ -25,31 +25,31 @@
 
 今回先に固定するテスト対象は次である。
 
-- `scripts/step0_disease_temporal_split.py` の default 引数
+- `scripts/build_disease_temporal_split_artifact.py` の default 引数
 - shortlist mode ごとの query
 - temporal delta の定義
 - earliest appearance による protein-disjoint split
 - split integrity validation
 - NK / LK 判定
-- Step 0 markdown report の必須要素
+- temporal split report の必須要素
 
 追加済みのテストファイル:
 
-- [test_step0_disease_temporal_split.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/test/test_step0_disease_temporal_split.py)
+- [test_build_disease_temporal_split_artifact.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/test/test_build_disease_temporal_split_artifact.py)
 
 実行コマンド:
 
 ```bash
-.venv-step0/bin/python -m unittest discover -s test -v
+.venv-contract-tests/bin/python -m unittest discover -s test -v
 ```
 
 ## 3. 実装順序
 
-### 3.1 Step 0 を current implementation version で固定する
+### 3.1 temporal split artifact を current implementation version で固定する
 
 対象ファイル:
 
-- [step0_disease_temporal_split.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/scripts/step0_disease_temporal_split.py)
+- [build_disease_temporal_split_artifact.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/scripts/build_disease_temporal_split_artifact.py)
 
 やること:
 
@@ -62,8 +62,8 @@
 実行コマンド:
 
 ```bash
-.venv-step0/bin/python scripts/step0_disease_temporal_split.py \
-  --output-dir domain/specification/busiless-rules/artifacts/step0_human_ub_20260406 \
+.venv-mac-data/bin/python scripts/build_disease_temporal_split_artifact.py \
+  --output-dir data/artifacts/benchmarks/213_221_225_228/temporal_split \
   --train-start-release 213 \
   --train-end-release 221 \
   --dev-end-release 225 \
@@ -80,7 +80,7 @@
 - `train_assigned_labels.tsv`, `dev_assigned_labels.tsv`, `test_assigned_labels.tsv` がある
 - `nk_lk_eda.tsv` がある
 
-### 3.2 Step 0 artifact から dataset を作る
+### 3.2 temporal split artifact から dataset を作る
 
 対象ファイル:
 
@@ -89,8 +89,8 @@
 
 やること:
 
-- Step 0 artifact から supervised dataset を作る
-- Step 0 artifact から reasoning dataset を作る
+- temporal split artifact から supervised dataset を作る
+- temporal split artifact から reasoning dataset を作る
 - `train / validation / test` の split 名で保存する
 - `protein_id` と `split` が supervised / reasoning dataset で一致することを保証する
 - optional field は欠損列にせず空文字列で埋める
@@ -155,12 +155,13 @@
 
 - [eval.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/eval.py)
 - [train_protein_llm.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/train_protein_llm.py)
+- [research_registry.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/bioreason2/utils/research_registry.py)
 - 必要なら共通 helper を `bioreason2/utils/` に追加
 
 やること:
 
 - 各 run で `job_type` を明示する
-- dataset artifact / model artifact / step0 artifact を config に残す
+- dataset artifact / model artifact / temporal split artifact を config に残す
 - `benchmark_version`, `shortlist_mode`, release anchor を config に残す
 - W&B Artifact の alias を run config に残す
 - eval では `weave.Evaluation` を使って score と trace を保存する
@@ -170,7 +171,7 @@
 
 - `job_type`
 - `benchmark_version`
-- `step0_artifact`
+- `temporal_split_artifact`
 - `dataset_config`
 - `reasoning_dataset_config`
 - `dataset_artifact`
@@ -202,29 +203,38 @@
 
 - [eval.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/eval.py)
 - [sh_eval.sh](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/scripts/sh_eval.sh)
+- [run_registered_eval.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/scripts/run_registered_eval.py)
+- [data_registry.json](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/configs/disease_benchmark/data_registry.json)
+- [eval_target_registry.json](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/configs/disease_benchmark/eval_target_registry.json)
 
 現状のギャップ:
 
-- `eval.py` は現状 `validation` split を固定で読んでいる
-- `test` split を最終報告用に明示的に扱えていない
-- `wandb.init(job_type="eval")` と Weave logger がまだ実装されていない
+- registry を読んで model / data を自動解決する高位 entry point が必要
+- CoreWeave では login node から `srun` / `sbatch` で投げる前提に README を寄せる必要がある
+- 比較対象 4 系統のうち、BLAST / Diamond と ESM 系単体は prediction artifact で評価する経路が必要
 
 やること:
 
-- `--eval_split` のような引数を追加し、`validation` と `test` を切り替えられるようにする
-- 開発中の比較は `validation`、最終報告は `test` を使う
+- `validation` と `test` を切り替えられるようにする
+- `scripts/run_registered_eval.py` から data bundle registry と target registry を読む
+- data は W&B artifact reference から解決する
+- public checkpoint は Hugging Face から自動取得し、private checkpoint は W&B artifact から解決する
+- `base-family`, `tuned-family`, `spec-comparison` の target group を評価できるようにする
+- BLAST / Diamond と ESM 系単体は prediction artifact を直接 F_max 評価できるようにする
 - metric を `wandb.log()` する
 - summary table を 1 evaluated target 1 row で `wandb.log()` する
 - sample-level table を 1 sample 1 row で `wandb.log()` する
 - reasoning task では `reasoning_full`, `final_answer`, `intermediate_trace` を保存する
 - JSON 結果を Artifact として version 管理する
-- `weave.Evaluation` の eval logger でも追跡する
+- ProteinLLM 系は `weave.Evaluation` の eval logger でも追跡する
 
 受け入れ基準:
 
-- 同じ checkpoint に対して `validation` と `test` を分けて評価できる
+- 同じ target に対して `validation` と `test` を分けて評価できる
+- `scripts/run_registered_eval.py` だけで model path を手入力せずに評価を起動できる
+- `base-family` を一括で回せる
 - W&B 上に metric, summary table, sample table が残る
-- Weave 側に同一 eval run の追跡が残る
+- ProteinLLM 系では Weave 側に同一 eval run の追跡が残る
 
 ### 3.6 SFT を仕様どおりに直す
 
@@ -277,7 +287,7 @@
 
 ## 4. 実装時に追加するテスト
 
-Step 0 の契約テストに続いて、次を順に追加する。
+temporal split artifact の契約テストに続いて、次を順に追加する。
 
 ### 4.1 dataset 化テスト
 
@@ -289,6 +299,9 @@ Step 0 の契約テストに続いて、次を順に追加する。
 ### 4.2 eval テスト
 
 - `validation` / `test` の切替
+- registry bundle / target の解決
+- Hugging Face / W&B source fallback
+- target group 実行
 - summary table の列
 - sample-level table の列
 - reasoning 途中過程の保存
@@ -314,9 +327,9 @@ Step 0 の契約テストに続いて、次を順に追加する。
 
 迷ったら次の順に進める。
 
-1. Step 0 の再現性を壊さない
+1. temporal split artifact の再現性を壊さない
 2. dataset の split 整合を固める
-3. eval を `validation` / `test` 切替可能にする
+3. eval を registry 駆動にして `validation` / `test` 切替可能にする
 4. W&B / Weave の lineage を入れる
 5. SFT を仕様どおりにする
 6. RL を仕様どおりにする
@@ -328,10 +341,10 @@ Step 0 の契約テストに続いて、次を順に追加する。
 ### 6.1 ローカルテスト
 
 ```bash
-.venv-step0/bin/python -m unittest discover -s test -v
+.venv-contract-tests/bin/python -m unittest discover -s test -v
 ```
 
-### 6.2 Step 0 artifact の確認
+### 6.2 temporal split artifact の確認
 
 - `summary.json`
 - `report.md`
@@ -347,6 +360,7 @@ Step 0 の契約テストに続いて、次を順に追加する。
 - summary table
 - sample-level table
 - Weave trace / evaluation
+- registry file と run config の target family が一致している
 
 ### 6.4 split leakage の確認
 

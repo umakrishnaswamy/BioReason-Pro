@@ -38,23 +38,25 @@ unset SLURM_TRES_PER_TASK
 # ===================================================================================================
 # Shared Configuration
 # ===================================================================================================
-BASE_WANDB_PROJECT="bioreason-pro-finetune"
+BASE_WANDB_PROJECT=${BASE_WANDB_PROJECT:-"bioreason-pro-finetune"}
+WANDB_ENTITY=${WANDB_ENTITY:-""}
 TEXT_MODEL_NAME="Qwen/Qwen3-4B-Thinking-2507"
 EXPERIMENT_NAME="reasoning-sft"
 
 # --- Paths: Set these to your local directories ---
-BASE_CHECKPOINT_DIR=""              # e.g., /data/checkpoints
-DATASET_CACHE_DIR=""                # e.g., /data/bioreason/data
-CACHE_DIR=""                        # e.g., /data/bioreason/cache
-STRUCTURE_DIR=""                    # e.g., /data/bioreason/structures
-GO_EMBEDDINGS_PATH=""               # e.g., /data/bioreason/go_embeddings
-GO_OBO_PATH=""                      # e.g., /path/to/go-basic.obo
+BASE_CHECKPOINT_DIR=${BASE_CHECKPOINT_DIR:-"data/artifacts/models/bioreason_pro_base"}
+DATASET_CACHE_DIR=${DATASET_CACHE_DIR:-"data/artifacts/hf_cache"}
+CACHE_DIR=${CACHE_DIR:-"data/artifacts/cache"}
+STRUCTURE_DIR=${STRUCTURE_DIR:-"data/structures"}
+GO_EMBEDDINGS_PATH=${GO_EMBEDDINGS_PATH:-"${BIOREASON_GO_EMBEDDINGS_PATH:-}"}
+GO_OBO_PATH=${GO_OBO_PATH:-"bioreason2/dataset/go-basic.obo"}
 
 # --- Dataset Configuration ---
-STAGE1_DATASET_NAME="bioreason-pro-sft-reasoning-data"
-STAGE2_DATASET_NAME="bioreason-pro-sft-reasoning-data"
+CAFA5_DATASET=${CAFA5_DATASET:-"wanglab/cafa5"}
+STAGE1_DATASET_NAME=${STAGE1_DATASET_NAME:-"disease_temporal_hc_reasoning_v1"}
+STAGE2_DATASET_NAME=${STAGE2_DATASET_NAME:-"disease_temporal_hc_reasoning_v1"}
 STAGE2_DATASET_WEIGHTS="1"
-REASONING_DATASET_NAME="bioreason-pro-sft-reasoning-data"
+REASONING_DATASET_NAME=${REASONING_DATASET_NAME:-"disease_temporal_hc_reasoning_v1"}
 GO_GPT_PREDICTIONS_COLUMN="go_pred"
 INCLUDE_GROUND_TRUTH_IN_FINAL_ANSWER=False
 ADD_UNIPROT_SUMMARY=True
@@ -62,11 +64,11 @@ IS_SWISSPROT=False
 
 # --- Benchmark / Tracking Configuration ---
 BENCHMARK_VERSION="213 -> 221 -> 225 -> 228"
-STEP0_ARTIFACT="domain/specification/busiless-rules/artifacts/step0_human_ub_20260406"
+TEMPORAL_SPLIT_ARTIFACT="disease-temporal-split:production"
 DATASET_CONFIG="disease_temporal_hc_v1"
 REASONING_DATASET_CONFIG="disease_temporal_hc_reasoning_v1"
-DATASET_ARTIFACT=""                 # e.g., wandb artifact or HF dataset version string
-BASE_CHECKPOINT=""                  # e.g., a base model artifact alias or absolute path
+DATASET_ARTIFACT="disease-temporal-reasoning:production"
+BASE_CHECKPOINT=${BASE_CHECKPOINT:-"bioreason-pro-base:production"}
 SHORTLIST_MODE="high-confidence"
 SHORTLIST_QUERY="reviewed:true AND organism_id:9606 AND cc_disease:* AND (xref:mim-* OR xref:orphanet-*) AND (go_exp:* OR go_ida:* OR go_ipi:* OR go_igi:* OR go_imp:* OR go_iep:* OR go_ic:* OR go_tas:*)"
 TRAIN_START_RELEASE=213
@@ -90,10 +92,10 @@ PPI_IN_PROMPT=True
 
 BASE_COMMAND="srun python train_protein_llm.py \
     --cache_dir $CACHE_DIR \
-    --wandb_entity adibvafa \
+    --wandb_entity $WANDB_ENTITY \
     --wandb_job_type train_sft \
     --benchmark_version "$BENCHMARK_VERSION" \
-    --step0_artifact "$STEP0_ARTIFACT" \
+    --temporal_split_artifact "$TEMPORAL_SPLIT_ARTIFACT" \
     --dataset_config "$DATASET_CONFIG" \
     --reasoning_dataset_config "$REASONING_DATASET_CONFIG" \
     --dataset_artifact "$DATASET_ARTIFACT" \
@@ -116,7 +118,7 @@ BASE_COMMAND="srun python train_protein_llm.py \
     --gradient_accumulation_steps 1 \
     --model_type protein-llm \
     --dataset_type cafa5 \
-    --cafa5_dataset wanglab/cafa5 \
+    --cafa5_dataset $CAFA5_DATASET \
     --reasoning_dataset_name $REASONING_DATASET_NAME \
     --go_gpt_predictions_column $GO_GPT_PREDICTIONS_COLUMN \
     --include_ground_truth_in_final_answer $INCLUDE_GROUND_TRUTH_IN_FINAL_ANSWER \

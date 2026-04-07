@@ -1062,7 +1062,11 @@ if __name__ == "__main__":
         help="Logical W&B job type for this training phase.",
     )
     parser.add_argument("--benchmark_version", type=str, default=None)
-    parser.add_argument("--step0_artifact", type=str, default=None)
+    parser.add_argument(
+        "--temporal_split_artifact",
+        type=str,
+        default=None,
+    )
     parser.add_argument("--dataset_config", type=str, default=None)
     parser.add_argument("--reasoning_dataset_config", type=str, default=None)
     parser.add_argument("--dataset_artifact", type=str, default=None)

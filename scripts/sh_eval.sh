@@ -42,24 +42,19 @@ mkdir -p "$TRANSFORMERS_CACHE"
 
 # ===================================================================================================
 # Model Checkpoint
-# Download from Hugging Face and set the path below.
+# This is the low-level wrapper. Prefer scripts/run_registered_eval.py for registry-driven execution.
 # ===================================================================================================
-
-# SFT checkpoint — download from https://huggingface.co/wanglab/bioreason-pro-sft
-# MODEL_PATH="/path/to/bioreason-pro-sft"
-
-# RL checkpoint — download from https://huggingface.co/wanglab/bioreason-pro-rl
 MODEL_PATH=${MODEL_PATH:-"/path/to/bioreason-pro-rl"}
 
 # ===================================================================================================
 # Paths: Set these to your local directories
 # ===================================================================================================
 PROTEIN_MODEL_NAME=${PROTEIN_MODEL_NAME:-"esm3_sm_open_v1"}
-GO_OBO_PATH=${GO_OBO_PATH:-""}                      # e.g., /path/to/go-basic.obo
+GO_OBO_PATH=${GO_OBO_PATH:-"bioreason2/dataset/go-basic.obo"}  # repo-local default
 IA_FILE_PATH=${IA_FILE_PATH:-""}                   # e.g., /path/to/IA.txt
 GO_EMBEDDINGS_PATH=${GO_EMBEDDINGS_PATH:-""}       # e.g., /data/bioreason/go_embeddings
-DATASET_CACHE_DIR=${DATASET_CACHE_DIR:-""}         # e.g., /data/bioreason/data
-STRUCTURE_DIR=${STRUCTURE_DIR:-""}                 # e.g., /data/bioreason/structures
+DATASET_CACHE_DIR=${DATASET_CACHE_DIR:-"data/artifacts/hf_cache"}
+STRUCTURE_DIR=${STRUCTURE_DIR:-"data/structures"}
 
 EVAL_SCRIPT="eval.py"
 EVALS_PATH=${EVALS_PATH:-"$EVALS_DIR/results"}
@@ -89,6 +84,7 @@ GO_NUM_REDUCED_EMBEDDINGS=200
 GO_EMBEDDING_DIM=2560
 
 # Dataset configuration
+CAFA5_DATASET=${CAFA5_DATASET:-"wanglab/cafa5"}
 DATASET_NAME=${DATASET_NAME:-"interlabel_test_dataset_with_gogpt_memorized_copy"}
 REASONING_DATASET_NAME=${REASONING_DATASET_NAME:-"interlabel_test_dataset_with_gogpt_memorized_copy"}
 SPLIT_GO_ASPECTS=False
@@ -106,8 +102,18 @@ APPLY_GO_FILTERING_TO_VAL_TEST=False
 EVAL_SPLIT=${EVAL_SPLIT:-validation}
 BENCHMARK_VERSION=${BENCHMARK_VERSION:-}
 MODEL_NAME=${MODEL_NAME:-}
+TEMPORAL_SPLIT_ARTIFACT=${TEMPORAL_SPLIT_ARTIFACT:-}
+DATASET_ARTIFACT=${DATASET_ARTIFACT:-}
+MODEL_ARTIFACT=${MODEL_ARTIFACT:-}
+SHORTLIST_QUERY=${SHORTLIST_QUERY:-}
+SHORTLIST_MODE=${SHORTLIST_MODE:-}
+TRAIN_START_RELEASE=${TRAIN_START_RELEASE:-}
+TRAIN_END_RELEASE=${TRAIN_END_RELEASE:-}
+DEV_END_RELEASE=${DEV_END_RELEASE:-}
+TEST_END_RELEASE=${TEST_END_RELEASE:-}
 METRICS_SUMMARY_PATH=${METRICS_SUMMARY_PATH:-}
 METRIC_THREADS=${METRIC_THREADS:-0}
+METRIC_THRESHOLD_STEP=${METRIC_THRESHOLD_STEP:-0.99}
 WANDB_PROJECT=${WANDB_PROJECT:-}
 WANDB_ENTITY=${WANDB_ENTITY:-}
 WANDB_RUN_NAME=${WANDB_RUN_NAME:-}
@@ -140,9 +146,40 @@ fi
 if [ -n "$MODEL_NAME" ]; then
     TRACKING_ARGS+=(--model_name "$MODEL_NAME")
 fi
+if [ -n "$TEMPORAL_SPLIT_ARTIFACT" ]; then
+    TRACKING_ARGS+=(--temporal_split_artifact "$TEMPORAL_SPLIT_ARTIFACT")
+fi
+if [ -n "$DATASET_ARTIFACT" ]; then
+    TRACKING_ARGS+=(--dataset_artifact "$DATASET_ARTIFACT")
+fi
+if [ -n "$MODEL_ARTIFACT" ]; then
+    TRACKING_ARGS+=(--model_artifact "$MODEL_ARTIFACT")
+fi
+if [ -n "$SHORTLIST_QUERY" ]; then
+    TRACKING_ARGS+=(--shortlist_query "$SHORTLIST_QUERY")
+fi
+if [ -n "$SHORTLIST_MODE" ]; then
+    TRACKING_ARGS+=(--shortlist_mode "$SHORTLIST_MODE")
+fi
+if [ -n "$TRAIN_START_RELEASE" ]; then
+    TRACKING_ARGS+=(--train_start_release "$TRAIN_START_RELEASE")
+fi
+if [ -n "$TRAIN_END_RELEASE" ]; then
+    TRACKING_ARGS+=(--train_end_release "$TRAIN_END_RELEASE")
+fi
+if [ -n "$DEV_END_RELEASE" ]; then
+    TRACKING_ARGS+=(--dev_end_release "$DEV_END_RELEASE")
+fi
+if [ -n "$TEST_END_RELEASE" ]; then
+    TRACKING_ARGS+=(--test_end_release "$TEST_END_RELEASE")
+fi
 if [ -n "$METRICS_SUMMARY_PATH" ]; then
     TRACKING_ARGS+=(--metrics_summary_path "$METRICS_SUMMARY_PATH")
 fi
+if [ -n "$IA_FILE_PATH" ]; then
+    TRACKING_ARGS+=(--ia_file_path "$IA_FILE_PATH")
+fi
+TRACKING_ARGS+=(--metric_threshold_step "$METRIC_THRESHOLD_STEP")
 if [ -n "$WANDB_PROJECT" ]; then
     TRACKING_ARGS+=(--wandb_project "$WANDB_PROJECT")
 fi
@@ -178,7 +215,7 @@ python "$EVAL_SCRIPT" \
     --go_num_heads $GO_NUM_HEADS \
     --go_num_reduced_embeddings $GO_NUM_REDUCED_EMBEDDINGS \
     --go_embedding_dim $GO_EMBEDDING_DIM \
-    --cafa5_dataset "wanglab/cafa5" \
+    --cafa5_dataset "$CAFA5_DATASET" \
     --cafa5_dataset_name "$DATASET_NAME" \
     --reasoning_dataset_name "$REASONING_DATASET_NAME" \
     --go_gpt_predictions_column "$GO_GPT_PREDICTIONS_COLUMN" \

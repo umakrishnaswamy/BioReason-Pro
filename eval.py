@@ -574,10 +574,11 @@ def build_eval_summary_row(args, run_summary: Dict[str, Any], metrics_summary: D
 
 def build_tracking_config(args, run_summary: Dict[str, Any], metrics_summary: Dict[str, Any]) -> Dict[str, Any]:
     """Build a shared config payload for W&B tracking."""
+    temporal_split_artifact = getattr(args, "temporal_split_artifact", None)
     config = {
         "job_type": "eval",
         "benchmark_version": resolve_benchmark_version(args),
-        "step0_artifact": getattr(args, "step0_artifact", None),
+        "temporal_split_artifact": temporal_split_artifact,
         "dataset_config": args.cafa5_dataset_name,
         "reasoning_dataset_config": args.reasoning_dataset_name,
         "dataset_artifact": getattr(args, "dataset_artifact", None),
@@ -1248,7 +1249,11 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     tracking_group = parser.add_argument_group("Tracking Configuration")
     tracking_group.add_argument("--benchmark_version", type=str, default=None)
     tracking_group.add_argument("--model_name", type=str, default=None)
-    tracking_group.add_argument("--step0_artifact", type=str, default=None)
+    tracking_group.add_argument(
+        "--temporal_split_artifact",
+        type=str,
+        default=None,
+    )
     tracking_group.add_argument("--dataset_artifact", type=str, default=None)
     tracking_group.add_argument("--model_artifact", type=str, default=None)
     tracking_group.add_argument("--shortlist_query", type=str, default=None)

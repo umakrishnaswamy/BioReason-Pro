@@ -11,11 +11,11 @@ import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT_PATH = ROOT / "scripts" / "step0_disease_temporal_split.py"
+SCRIPT_PATH = ROOT / "scripts" / "build_disease_temporal_split_artifact.py"
 
 
-def load_step0_module():
-    module_name = "step0_disease_temporal_split_test_module"
+def load_temporal_split_module():
+    module_name = "build_disease_temporal_split_artifact_test_module"
     spec = importlib.util.spec_from_file_location(module_name, SCRIPT_PATH)
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
@@ -24,7 +24,7 @@ def load_step0_module():
     return module
 
 
-STEP0 = load_step0_module()
+TEMPORAL_SPLIT = load_temporal_split_module()
 
 
 def make_raw_df(*rows):
@@ -38,27 +38,30 @@ def make_label_df(*rows):
     return pd.DataFrame(rows, columns=["DB_ID", "GO_ID", "Aspect"])
 
 
-class Step0DiseaseTemporalSplitTests(unittest.TestCase):
+class BuildDiseaseTemporalSplitArtifactTests(unittest.TestCase):
     def test_parse_args_defaults_match_current_spec(self):
-        with mock.patch.object(sys, "argv", ["step0_disease_temporal_split.py"]):
-            args = STEP0.parse_args()
+        with mock.patch.object(sys, "argv", ["build_disease_temporal_split_artifact.py"]):
+            args = TEMPORAL_SPLIT.parse_args()
 
-        self.assertEqual(args.output_dir, "domain/specification/busiless-rules/artifacts/step0_human_ub_20260406")
+        self.assertEqual(
+            args.output_dir,
+            "data/artifacts/benchmarks/213_221_225_228/temporal_split",
+        )
         self.assertEqual(args.train_start_release, 213)
         self.assertEqual(args.train_end_release, 221)
         self.assertEqual(args.dev_end_release, 225)
         self.assertEqual(args.test_end_release, 228)
         self.assertEqual(args.shortlist_mode, "high-confidence")
 
-        windows = STEP0.build_windows(args)
+        windows = TEMPORAL_SPLIT.build_windows(args)
         self.assertEqual(
             windows,
             [("train", 213, 221), ("dev", 221, 225), ("test", 225, 228)],
         )
 
     def test_shortlist_query_for_mode_matches_spec_contract(self):
-        main_query = STEP0.shortlist_query_for_mode("main")
-        high_conf_query = STEP0.shortlist_query_for_mode("high-confidence")
+        main_query = TEMPORAL_SPLIT.shortlist_query_for_mode("main")
+        high_conf_query = TEMPORAL_SPLIT.shortlist_query_for_mode("high-confidence")
 
         self.assertIn("reviewed:true", main_query)
         self.assertIn("organism_id:9606", main_query)
@@ -71,7 +74,7 @@ class Step0DiseaseTemporalSplitTests(unittest.TestCase):
         self.assertIn("go_tas:*", high_conf_query)
 
         with self.assertRaises(ValueError):
-            STEP0.shortlist_query_for_mode("unsupported")
+            TEMPORAL_SPLIT.shortlist_query_for_mode("unsupported")
 
     def test_compute_delta_ignores_evidence_only_changes(self):
         old_df = make_raw_df(
@@ -84,7 +87,7 @@ class Step0DiseaseTemporalSplitTests(unittest.TestCase):
             ("P3", "GO:0003", "C", "IMP", "20230101"),
         )
 
-        novel_raw, novel_labels = STEP0.compute_delta(old_df, new_df)
+        novel_raw, novel_labels = TEMPORAL_SPLIT.compute_delta(old_df, new_df)
 
         self.assertEqual(
             set(novel_labels.itertuples(index=False, name=None)),
@@ -103,7 +106,7 @@ class Step0DiseaseTemporalSplitTests(unittest.TestCase):
             "test": make_label_df(("P2", "GO:0005", "F"), ("P4", "GO:0006", "P")),
         }
 
-        assigned, earliest_split = STEP0.assign_earliest_split(window_to_labels, windows)
+        assigned, earliest_split = TEMPORAL_SPLIT.assign_earliest_split(window_to_labels, windows)
 
         self.assertEqual(
             earliest_split,
@@ -120,9 +123,9 @@ class Step0DiseaseTemporalSplitTests(unittest.TestCase):
             "dev": make_label_df(("P1", "GO:0003", "P"), ("P3", "GO:0004", "C")),
             "test": make_label_df(("P2", "GO:0005", "F"), ("P4", "GO:0006", "P")),
         }
-        assigned_labels, earliest_split = STEP0.assign_earliest_split(window_to_labels, windows)
+        assigned_labels, earliest_split = TEMPORAL_SPLIT.assign_earliest_split(window_to_labels, windows)
 
-        validation = STEP0.validate_split_integrity(
+        validation = TEMPORAL_SPLIT.validate_split_integrity(
             windows=windows,
             window_to_labels=window_to_labels,
             assigned_labels=assigned_labels,
@@ -152,7 +155,7 @@ class Step0DiseaseTemporalSplitTests(unittest.TestCase):
         earliest_split = {"P1": "train", "P2": "test"}
 
         with self.assertRaisesRegex(ValueError, "Protein overlap detected"):
-            STEP0.validate_split_integrity(
+            TEMPORAL_SPLIT.validate_split_integrity(
                 windows=windows,
                 window_to_labels=window_to_labels,
                 assigned_labels=assigned_labels,
@@ -182,7 +185,7 @@ class Step0DiseaseTemporalSplitTests(unittest.TestCase):
             ]
         )
 
-        nk_lk_df, stats = STEP0.compute_nk_lk(label_df, train_df)
+        nk_lk_df, stats = TEMPORAL_SPLIT.compute_nk_lk(label_df, train_df)
 
         self.assertEqual(
             set(nk_lk_df.itertuples(index=False, name=None)),
@@ -199,7 +202,7 @@ class Step0DiseaseTemporalSplitTests(unittest.TestCase):
         self.assertEqual(stats["nk_lk_raw_records"], 2)
 
     def test_write_markdown_report_contains_required_sections(self):
-        summary = STEP0.SplitSummary(
+        summary = TEMPORAL_SPLIT.SplitSummary(
             split="train",
             start_release=213,
             end_release=221,
@@ -226,22 +229,22 @@ class Step0DiseaseTemporalSplitTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "report.md"
-            STEP0.write_markdown_report(
+            TEMPORAL_SPLIT.write_markdown_report(
                 output_path=output_path,
                 shortlist_count=5088,
                 summaries=[summary],
-                shortlist_query=STEP0.HIGH_CONFIDENCE_SHORTLIST_QUERY,
+                shortlist_query=TEMPORAL_SPLIT.HIGH_CONFIDENCE_SHORTLIST_QUERY,
             )
 
             text = output_path.read_text(encoding="utf-8")
 
-        self.assertIn("# Step 0 Disease Temporal Split Report", text)
+        self.assertIn("# Disease Temporal Split Artifact Report", text)
         self.assertIn("Proteins: **5,088**", text)
         self.assertIn("| Split | Window | Proteins | Unique labels |", text)
         self.assertIn("| train | 213->221 | 4 | 8 | 11 | 1 | 2 | 3 | 2.00 |", text)
         self.assertIn("Counts are based on protein-disjoint assignment by earliest temporal appearance.", text)
 
-    def test_main_writes_required_step0_outputs_and_summary_contract(self):
+    def test_main_writes_required_temporal_split_outputs_and_summary_contract(self):
         release_frames = {
             213: make_raw_df(),
             221: make_raw_df(
@@ -277,22 +280,22 @@ class Step0DiseaseTemporalSplitTests(unittest.TestCase):
             return release_frames[release].copy()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            output_dir = Path(tmpdir) / "step0_contract"
+            output_dir = Path(tmpdir) / "temporal_split_contract"
             argv = [
-                "step0_disease_temporal_split.py",
+                "build_disease_temporal_split_artifact.py",
                 "--output-dir",
                 str(output_dir),
                 "--skip-propagation",
             ]
 
             with mock.patch.object(sys, "argv", argv), mock.patch.object(
-                STEP0, "fetch_shortlist", side_effect=fake_fetch_shortlist
-            ), mock.patch.object(STEP0, "prepare_filtered_gaf", return_value=None), mock.patch.object(
-                STEP0, "load_filtered_gaf", side_effect=fake_load_filtered_gaf
+                TEMPORAL_SPLIT, "fetch_shortlist", side_effect=fake_fetch_shortlist
+            ), mock.patch.object(TEMPORAL_SPLIT, "prepare_filtered_gaf", return_value=None), mock.patch.object(
+                TEMPORAL_SPLIT, "load_filtered_gaf", side_effect=fake_load_filtered_gaf
             ), mock.patch.object(
-                STEP0, "load_cafa5_train_minimal", side_effect=RuntimeError("gated")
+                TEMPORAL_SPLIT, "load_cafa5_train_minimal", side_effect=RuntimeError("gated")
             ):
-                exit_code = STEP0.main()
+                exit_code = TEMPORAL_SPLIT.main()
 
             self.assertEqual(exit_code, 0)
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Construct a disease-focused temporal split for BioReason-Pro Step 0.
+Construct a disease-focused temporal split artifact for BioReason-Pro.
 
 This script:
 1. Builds a reviewed human disease-protein shortlist from UniProt.
@@ -164,7 +164,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output-dir",
-        default="domain/specification/busiless-rules/artifacts/step0_human_ub_20260406",
+        default="data/artifacts/benchmarks/213_221_225_228/temporal_split",
         help="Directory where intermediate files and summaries will be written.",
     )
     parser.add_argument(
@@ -748,7 +748,7 @@ def write_markdown_report(
     shortlist_query: str,
 ) -> None:
     lines = [
-        "# Step 0 Disease Temporal Split Report",
+        "# Disease Temporal Split Artifact Report",
         "",
         "## Shortlist",
         "",

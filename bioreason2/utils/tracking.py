@@ -80,6 +80,7 @@ def first_non_empty(*values: Any) -> str:
 def build_training_tracking_config(args: Any, run_name: str, job_type: Optional[str] = None) -> Dict[str, Any]:
     """Build the common W&B config required by the disease benchmark spec."""
     resolved_job_type = job_type or _get_arg(args, "wandb_job_type", "train_sft")
+    temporal_split_artifact = first_non_empty(_get_arg(args, "temporal_split_artifact"))
     dataset_config = first_non_empty(_get_arg(args, "dataset_config"), _get_arg(args, "cafa5_dataset_name"))
     reasoning_dataset_config = first_non_empty(
         _get_arg(args, "reasoning_dataset_config"),
@@ -94,7 +95,7 @@ def build_training_tracking_config(args: Any, run_name: str, job_type: Optional[
     return {
         "job_type": resolved_job_type,
         "benchmark_version": first_non_empty(_get_arg(args, "benchmark_version"), dataset_config),
-        "step0_artifact": normalize_text(_get_arg(args, "step0_artifact")),
+        "temporal_split_artifact": temporal_split_artifact,
         "dataset_config": dataset_config,
         "reasoning_dataset_config": reasoning_dataset_config,
         "dataset_artifact": normalize_text(_get_arg(args, "dataset_artifact")),

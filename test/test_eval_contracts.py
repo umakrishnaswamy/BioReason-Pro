@@ -260,7 +260,7 @@ def make_eval_args(**overrides):
         evals_path="/tmp/evals",
         benchmark_version=None,
         model_name=None,
-        step0_artifact=None,
+        temporal_split_artifact=None,
         dataset_artifact=None,
         model_artifact=None,
         shortlist_query=None,
