@@ -23,6 +23,7 @@ dependencies = [
     "peft",
     "pytorch_lightning",
     "wandb",
+    "weave",
     "trl",
     "vllm>=0.9.0",
     "bitsandbytes",

@@ -486,14 +486,20 @@ def extract_metrics_summary(results) -> Dict[str, float]:
     for ns in df["ns"].unique():
         ns_data = df[df["ns"] == ns].iloc[0]  # Get the row for this namespace
         metrics[f"{ns}_f1"] = ns_data["f"]
-        metrics[f"{ns}_weighted_f1"] = ns_data["f_w"]
+        if "f_w" in ns_data.index and pd.notna(ns_data["f_w"]):
+            metrics[f"{ns}_weighted_f1"] = ns_data["f_w"]
 
     # Compute overall means
     f1_values = [metrics[f"{ns}_f1"] for ns in df["ns"].unique()]
-    fw1_values = [metrics[f"{ns}_weighted_f1"] for ns in df["ns"].unique()]
 
     metrics["overall_mean_f1"] = sum(f1_values) / len(f1_values)
-    metrics["overall_mean_weighted_f1"] = sum(fw1_values) / len(fw1_values)
+    fw1_values = [
+        metrics[f"{ns}_weighted_f1"]
+        for ns in df["ns"].unique()
+        if f"{ns}_weighted_f1" in metrics
+    ]
+    if fw1_values:
+        metrics["overall_mean_weighted_f1"] = sum(fw1_values) / len(fw1_values)
 
     # Print summary
     print("\nF1 scores by aspect:")
@@ -501,10 +507,15 @@ def extract_metrics_summary(results) -> Dict[str, float]:
         print(f"  {ns}: {metrics[f'{ns}_f1']:.4f}")
     print(f"  Overall mean: {metrics['overall_mean_f1']:.4f}")
 
-    print("\nWeighted F1 scores by aspect:")
-    for ns in df["ns"].unique():
-        print(f"  {ns}: {metrics[f'{ns}_weighted_f1']:.4f}")
-    print(f"  Overall mean: {metrics['overall_mean_weighted_f1']:.4f}")
+    if fw1_values:
+        print("\nWeighted F1 scores by aspect:")
+        for ns in df["ns"].unique():
+            metric_key = f"{ns}_weighted_f1"
+            if metric_key in metrics:
+                print(f"  {ns}: {metrics[metric_key]:.4f}")
+        print(f"  Overall mean: {metrics['overall_mean_weighted_f1']:.4f}")
+    else:
+        print("\nWeighted F1 scores by aspect: not available for this evaluation output")
 
     return metrics
 

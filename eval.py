@@ -770,7 +770,10 @@ def maybe_log_eval_to_weave(
     """Track eval rows with Weave Evaluation when configured."""
     if not should_run_weave_evaluation(args):
         return False
-    if weave is None or not sample_rows:
+    if weave is None:
+        print("⚠️  Weave package is unavailable; final test eval requires `weave` to be installed.")
+        return False
+    if not sample_rows:
         return False
 
     weave_project = (getattr(args, "weave_project", None) or "").strip()
@@ -830,6 +833,19 @@ def maybe_log_eval_to_weave(
     except Exception as exc:
         print(f"⚠️  Weave eval logging failed, continuing without Weave tracking: {exc}")
         return False
+
+
+def enforce_required_eval_outputs(args, tracking_status: Dict[str, Any]) -> None:
+    """Fail the eval run when required tracking outputs are missing."""
+    missing = []
+    if not tracking_status.get("wandb_logged"):
+        missing.append("W&B logging")
+    if not tracking_status.get("metrics_loaded"):
+        missing.append("Fmax metrics")
+    if should_run_weave_evaluation(args) and not tracking_status.get("weave_logged"):
+        missing.append("Weave evaluation")
+    if missing:
+        raise RuntimeError(f"Required eval outputs missing: {', '.join(missing)}")
 
 
 def log_eval_tracking(
@@ -1153,6 +1169,7 @@ def run_local_inference(args):
         tracking_status = log_eval_tracking(args, run_summary, result_rows, metrics_summary=metrics_summary)
         run_summary.update(tracking_status)
         summary_path = write_run_summary(run_summary, args.evals_path)
+        enforce_required_eval_outputs(args, tracking_status)
         cleanup_status = maybe_cleanup_local_eval_outputs(args, tracking_status)
         if cleanup_status["cleanup_completed"]:
             print("🧾 Eval scratch was uploaded to W&B and removed locally.")
@@ -1169,7 +1186,7 @@ def run_local_inference(args):
     except Exception as e:
         print(f"Critical Error: {e}")
         traceback.print_exc()
-        return
+        raise SystemExit(1)
 
 
 def setup_argument_parser() -> argparse.ArgumentParser:

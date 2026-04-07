@@ -842,6 +842,32 @@ class EvalContractTests(unittest.TestCase):
         self.assertEqual(EVAL.weave.init_calls, [])
         self.assertEqual(EVAL.weave.Evaluation.instances, [])
 
+    def test_enforce_required_eval_outputs_requires_metrics_for_validation(self):
+        args = make_eval_args(eval_split="validation")
+
+        with self.assertRaisesRegex(RuntimeError, "Fmax metrics"):
+            EVAL.enforce_required_eval_outputs(
+                args,
+                {
+                    "wandb_logged": True,
+                    "metrics_loaded": False,
+                    "weave_logged": False,
+                },
+            )
+
+    def test_enforce_required_eval_outputs_requires_weave_for_test(self):
+        args = make_eval_args(eval_split="test")
+
+        with self.assertRaisesRegex(RuntimeError, "Weave evaluation"):
+            EVAL.enforce_required_eval_outputs(
+                args,
+                {
+                    "wandb_logged": True,
+                    "metrics_loaded": True,
+                    "weave_logged": False,
+                },
+            )
+
     def test_maybe_cleanup_local_eval_outputs_removes_scratch_after_wandb_logging(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             scratch_dir = Path(tmpdir) / "results"

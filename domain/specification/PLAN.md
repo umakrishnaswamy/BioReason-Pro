@@ -26,8 +26,8 @@
 | reasoning dataset 作成 | 完了 | `wandb-healthcare/bioreason-pro-custom/disease-temporal-reasoning:production` |
 | comparison model artifact 確定 | 完了 | `wandb-healthcare/bioreason-pro-custom/bioreason-pro-rl:production` |
 | CoreWeave 実行フロー整理 | 完了 | `srun` ベースの実行、remote env、artifact 解決、1-sample smoke まで確認済み |
-| comparison model の validation 評価 | 再実行中 | metrics-only / stratified 100-sample validation run で確認する |
-| SFT | 実行中 | `stage 2 only` の SFT run を CoreWeave で実行中 |
+| comparison model の validation 評価 | 要再実行 | Weave 未導入と Fmax 抽出失敗を直したあとで再実行する |
+| SFT | 要再実行 | 旧 run は full validation を使っていたため、100-sample subset でやり直す |
 | RL | 準備済み | `train_protein_grpo.py` と `scripts/sh_train_protein_grpo.sh` は実装済み、run は未実施 |
 
 ### 0.3 いま次にやること
@@ -170,7 +170,7 @@ cp configs/disease_benchmark/wandb_asset_sources.env.example \
 
 ## 3. 比較モデルの評価
 
-状態: **再実行待ち**
+状態: **修正後に再実行**
 
 ### 3.1 目的
 
@@ -220,6 +220,7 @@ W&B 上に次が見えていれば完了とする。
 
 validation run では metrics が保存されていれば十分であり、`eval_summary` table、`eval_samples` table、eval artifact は要求しない。
 sample 数は既定で `100`、subset 戦略は `stratified_aspect_profile` に固定する。
+`fmax_mf`, `fmax_bp`, `fmax_cc` のいずれかが欠けた run は完了扱いにしない。
 
 ### 3.5 このフェーズが終わったらやること
 

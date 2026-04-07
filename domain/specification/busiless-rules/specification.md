@@ -318,6 +318,7 @@ target family:
     - SFT / RL のあとに **別 run** として実行する
     - full `test` split を使う
     - Weave の Evaluation Loggerを使って評価をする
+    - Weave logging に失敗した run は成功扱いにしない
     - Weaveを使うが、同時に評価 summary を **1 evaluated target = 1 row** の W&B Table として保存する
         - 列: model_name, split, benchmark_version, <accuracyのmetricが各列に続く>
     - sample-level 結果を **1 sample = 1 row** の W&B Table として保存する
@@ -328,6 +329,7 @@ target family:
 - 開発中の比較、ablation、checkpoint 比較は `validation`
     - deterministic な **100-sample stratified subset** を使う
     - この時には、metricsだけで良い
+    - `fmax_mf`, `fmax_bp`, `fmax_cc` が保存できなかった run は成功扱いにしない
 
 
 ## 8. 学習 for SFT
@@ -355,6 +357,7 @@ W&B run は `wandb.init(..., job_type="train_sft")` で開始する。
 - canonical では、比較モデルに含まれる projector / GO module 重みをそのまま warm-start として使う
 - stage 1 の projector warm-up は、学習不安定時の fallback または ablation としてのみ扱う
 - validation subset の戦略は `stratified_aspect_profile` に固定する
+- checkpoint selection 用 validation subset は log 上で `selected=100` が確認できる状態にする
 - train / validation metric を `wandb.log()` で保存する
 - sample table を W&B Table として保存する
 - output checkpoint を W&B Artifact として登録する

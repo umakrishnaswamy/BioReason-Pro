@@ -75,6 +75,27 @@ class CafaEvalContractTests(unittest.TestCase):
         self.assertEqual(metrics["cellular_component_f1"], 0.7)
         self.assertAlmostEqual(metrics["overall_mean_f1"], (0.2 + 0.9 + 0.7) / 3)
 
+    def test_extract_metrics_summary_allows_missing_weighted_column(self):
+        best_f_df = pd.DataFrame(
+            {
+                "f": [0.2, 0.9, 0.7],
+            },
+            index=pd.Index(
+                ["biological_process", "molecular_function", "cellular_component"],
+                name="ns",
+            ),
+        )
+        dummy_eval_df = pd.DataFrame({"unused": []})
+
+        metrics = CAFA_EVALS.extract_metrics_summary((dummy_eval_df, {"f": best_f_df}))
+
+        self.assertEqual(metrics["biological_process_f1"], 0.2)
+        self.assertEqual(metrics["molecular_function_f1"], 0.9)
+        self.assertEqual(metrics["cellular_component_f1"], 0.7)
+        self.assertAlmostEqual(metrics["overall_mean_f1"], (0.2 + 0.9 + 0.7) / 3)
+        self.assertNotIn("biological_process_weighted_f1", metrics)
+        self.assertNotIn("overall_mean_weighted_f1", metrics)
+
     def test_normalize_metrics_for_logging_adds_fmax_aliases(self):
         metrics = {
             "biological_process_f1": 0.2,

@@ -342,11 +342,15 @@ srun \
 - `fmax_cc`
 - `overall_mean_fmax`
 
+この 4 つの metric が揃わなかった run は失敗として扱う。
+
 `test` run では次も追加で保存する。
 
 - `eval_summary` table
 - `eval_samples` table
 - Weave evaluation record
+
+Weave evaluation record が作れなかった `test` run も失敗として扱う。
 
 local eval 出力は scratch とみなし、W&B 保存成功後は既定で cleanup される。  
 local に残したいときだけ `--keep-local-eval-outputs` を付ける。
@@ -367,6 +371,7 @@ SFT の入力は次で固定する。
 SFT は reasoning dataset の `train` を学習に使い、`validation` から deterministic に切り出した **100-sample stratified subset** で checkpoint selection を行う。  
 `test` は最終評価専用であり、SFT 学習には使わない。最終比較は SFT 後に別 run の `eval` で出す。
 canonical run は **stage 2 only** とし、comparison model に含まれる projector / GO module 重みをそのまま warm-start として使う。
+checkpoint selection に使う subset は log 上で `selected=100` が確認できることを前提にする。
 
 ### 4.2 実行コマンド
 
