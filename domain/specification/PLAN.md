@@ -1,411 +1,366 @@
 # PLAN
 
-この PLAN は、[specification.md](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/domain/specification/busiless-rules/specification.md) を実装に落とすための実行順序を整理したものである。  
-以後、仕様の正本は `domain/specification/busiless-rules/specification.md` とし、本書はその実装計画として扱う。
+この PLAN は、[specification.md](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/domain/specification/busiless-rules/specification.md) と [RESEARCH_README.md](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/RESEARCH_README.md) をそのまま実行計画に落としたものである。  
+目的は、**何が終わっていて、次に何をやるかを曖昧にしないこと**である。
 
-## 1. 実装の前提
+## 0. 現在地
 
-まず固定してから実装する前提は次である。
+### 0.1 採用前提
 
-- benchmark version は `213 -> 221 -> 225 -> 228`
-- shortlist mode は `high-confidence`
-- split の意味は `train / validation / test`
-- 文中の `dev` は dataset split 名 `validation` と同義
-- train / validation / test は protein-disjoint かつ temporal order を守る
-- SFT と RL は別 split を作らず、同じ benchmark の `train / validation / test` を共有する
-- SFT は reasoning dataset を使う
-- RL は同じ `train` split から派生した reward / preference データを使う
-- W&B run の `job_type` は `eval`, `train_sft`, `train_rl`
-- 学習ジョブの time limit は `12:00:00`
+固定前提は次である。
 
-## 2. 先に作るテスト
+- benchmark version: `213 -> 221 -> 225 -> 228`
+- benchmark alias: `213.221.225.228`
+- primary dataset: `disease_temporal_hc_reasoning_v1`
+- comparison model: `bioreason-pro-rl-paper`
+- 正本: W&B Artifact ref
+- local filesystem: scratch
 
-実装に先立って、仕様のうち既にコード化されている business rule を `test/` に固定する。  
-これは実装中に benchmark 定義が崩れないようにするためである。
+### 0.2 進捗サマリ
 
-今回先に固定するテスト対象は次である。
+| 項目 | 状態 | 現状 |
+|---|---|---|
+| 仕様の整理 | 完了 | final 仕様は [specification.md](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/domain/specification/busiless-rules/specification.md) に統一済み |
+| 実行手順の整理 | 完了 | 現行 runbook は [RESEARCH_README.md](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/RESEARCH_README.md) |
+| temporal split artifact 作成 | 完了 | `wandb-healthcare/bioreason-pro-custom/disease-temporal-split:production` |
+| reasoning dataset 作成 | 完了 | `wandb-healthcare/bioreason-pro-custom/disease-temporal-reasoning:production` |
+| comparison model artifact 確定 | 完了 | `wandb-healthcare/bioreason-pro-custom/bioreason-pro-rl:production` |
+| CoreWeave 実行フロー整理 | 準備済み | `srun` ベースの実行手順は文書化済み、実機 run は未実施 |
+| comparison model の validation 評価 | 未着手 | 次の実行対象 |
+| SFT | 未着手 | wrapper と tracking は用意済み、run は未実施 |
+| RL | 未着手 | 方針は固定済み、実行 entry point は未整備 |
 
-- `scripts/build_disease_temporal_split_artifact.py` の default 引数
-- shortlist mode ごとの query
-- temporal delta の定義
-- earliest appearance による protein-disjoint split
-- split integrity validation
-- NK / LK 判定
-- temporal split report の必須要素
+### 0.3 いま次にやること
 
-追加済みのテストファイル:
+次の実行対象は **comparison-family を `validation` split で評価すること** である。  
+その前提として CoreWeave 側で `.env`、`wandb_registry_paths.env`、GPU 環境を揃える。
 
-- [test_build_disease_temporal_split_artifact.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/test/test_build_disease_temporal_split_artifact.py)
+## 1. データの準備
 
-実行コマンド:
+状態: **完了**
 
-```bash
-.venv-contract-tests/bin/python -m unittest discover -s test -v
-```
+### 1.1 やること
 
-## 3. 実装順序
+ローカル Mac で次を行う。
 
-### 3.1 temporal split artifact を current implementation version で固定する
+1. temporal split artifact を build する
+2. split sanity check を通す
+3. reasoning dataset を build する
+4. W&B Artifact に upload する
 
-対象ファイル:
+高位 entry point は [run_temporal_split_artifact_pipeline.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/scripts/run_temporal_split_artifact_pipeline.py) に固定する。
 
-- [build_disease_temporal_split_artifact.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/scripts/build_disease_temporal_split_artifact.py)
-
-やること:
-
-- `213 -> 221 -> 225 -> 228` を current implementation version として維持する
-- shortlist mode の default を `high-confidence` に保つ
-- `summary.json` に `split_validation` を必ず残す
-- `nk_lk_eda.tsv` を必ず出力する
-- `earliest_split_by_protein.json` を必ず出力する
-
-実行コマンド:
+### 1.2 実行コマンド
 
 ```bash
-.venv-mac-data/bin/python scripts/build_disease_temporal_split_artifact.py \
-  --output-dir data/artifacts/benchmarks/213_221_225_228/temporal_split \
-  --train-start-release 213 \
-  --train-end-release 221 \
-  --dev-end-release 225 \
-  --test-end-release 228 \
+cd /Users/keisuke/Project/learning/drug_discovery/BioReason-Pro
+
+set -a
+source .env
+set +a
+
+uv venv .venv-mac-data --python 3.11
+source .venv-mac-data/bin/activate
+uv pip install -r requirements/uv-local-data.txt
+
+uv run --active python scripts/run_temporal_split_artifact_pipeline.py \
+  --variant main \
   --shortlist-mode high-confidence \
-  --use-shell-filter
+  --use-shell-filter \
+  --build-datasets \
+  --upload-to-wandb \
+  --wandb-entity "$WANDB_ENTITY" \
+  --wandb-project "$WANDB_PROJECT"
 ```
 
-受け入れ基準:
+### 1.3 完了条件
 
-- `summary.json` に `split_validation.time_order_valid == true`
-- `summary.json` に `split_validation.protein_disjoint_valid == true`
-- `report.md` に split summary table がある
-- `train_assigned_labels.tsv`, `dev_assigned_labels.tsv`, `test_assigned_labels.tsv` がある
-- `nk_lk_eda.tsv` がある
+次が揃っていれば完了とする。
 
-### 3.2 temporal split artifact から dataset を作る
+- `split_validation.time_order_valid == true`
+- `split_validation.protein_disjoint_valid == true`
+- temporal split artifact が W&B に upload されている
+- reasoning dataset artifact が W&B に upload されている
 
-対象ファイル:
+### 1.4 現在の成果物
 
-- 新規 script を追加する場合は `scripts/build_disease_temporal_datasets.py`
-- dataset loader を追加する場合は `bioreason2/dataset/` 配下
-
-やること:
-
-- temporal split artifact から reasoning dataset を作る
-- `train / validation / test` の split 名で保存する
-- `protein_id` と `split` を temporal split artifact と一致させる
-- optional field は欠損列にせず空文字列で埋める
-
-固定する dataset config 名:
+- temporal split artifact
+  - `wandb-healthcare/bioreason-pro-custom/disease-temporal-split:production`
+- reasoning dataset artifact
+  - `wandb-healthcare/bioreason-pro-custom/disease-temporal-reasoning:production`
 
-- `disease_temporal_hc_reasoning_v1`
+## 2. GPU へのアクセス
 
-最低限入れる列:
+状態: **準備済み、実行は未了**
 
-- `protein_id`
-- `sequence`
-- `organism`
-- `go_bp`
-- `go_mf`
-- `go_cc`
-- `protein_function`
-- `go_pred`
-- `interpro_formatted`
-- `ppi_formatted`
-- reasoning dataset では追加で `reasoning`, `final_answer`
+### 2.1 やること
 
-受け入れ基準:
+CoreWeave SUNK の login node から `srun` で job を送る。  
+GPU node に手で入る前提にはしない。
 
-- reasoning dataset の split ごとの `protein_id` 集合が temporal split artifact と一致する
-- `test` に入っている protein が `train` / `validation` に存在しない
-- dataset が `load_cafa5_dataset()` 経由で読める形になっている
+### 2.2 実行手順
 
-### 3.3 RL 用の派生 dataset を作る
+1. login node に SSH する
+2. ローカルからコードだけ `rsync` する
+3. CoreWeave 側で `uv` 環境を作る
+4. `wandb_registry_paths.env` と `wandb_asset_sources.env` を用意する
 
-対象ファイル:
+### 2.3 実行コマンド
 
-- 新規 script を追加する場合は `scripts/build_disease_temporal_rl_dataset.py`
+SSH:
 
-やること:
+```bash
+ssh -o IdentitiesOnly=yes kkamata+cwb607@sunk.cwb607-training.coreweave.app
+```
 
-- RL 用の reward / preference dataset は `train` split からのみ作る
-- `protein_id` を保持する
-- `benchmark_version` を保持する
-- 元の reasoning dataset と join 可能な形にする
+rsync:
 
-推奨列:
+```bash
+cd /Users/keisuke/Project/learning/drug_discovery
 
-- `protein_id`
-- `split`
-- `prompt`
-- `response`
-- `reward`
-- `reward_components`
-- `notes`
+rsync -av --delete \
+  --exclude 'data/artifacts/' \
+  --exclude '.venv*/' \
+  BioReason-Pro/ \
+  kkamata+cwb607@sunk.cwb607-training.coreweave.app:~/BioReason-Pro/
+```
 
-受け入れ基準:
+CoreWeave 上の環境構築:
 
-- RL dataset に `validation` / `test` 由来の sample が入っていない
-- `protein_id` で元 dataset に戻れる
-- reward の内訳を後から監査できる
+```bash
+cd ~/BioReason-Pro
 
-### 3.4 W&B と Weave の共通 tracking を入れる
+uv venv .venv-gpu --python 3.11
+source .venv-gpu/bin/activate
 
-対象ファイル:
+uv sync
+uv pip install esm --no-deps
+uv pip install flash-attn --no-build-isolation --no-cache-dir
+uv pip install unsloth
+uv run --active wandb login
+```
 
-- [eval.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/eval.py)
-- [train_protein_llm.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/train_protein_llm.py)
-- [research_registry.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/bioreason2/utils/research_registry.py)
-- 必要なら共通 helper を `bioreason2/utils/` に追加
+env 準備:
 
-やること:
-
-- 各 run で `job_type` を明示する
-- dataset artifact / model artifact / temporal split artifact を config に残す
-- `benchmark_version`, `shortlist_mode`, release anchor を config に残す
-- W&B Artifact の alias を run config に残す
-- eval では `weave.Evaluation` を使って score と trace を保存する
-- RL rollout は Weave trace で追えるようにする
+```bash
+cd ~/BioReason-Pro
 
-最低限 W&B config に入れるもの:
-
-- `job_type`
-- `benchmark_version`
-- `temporal_split_artifact`
-- `dataset_config`
-- `reasoning_dataset_config`
-- `dataset_artifact`
-- `shortlist_query`
-- `shortlist_mode`
-- `train_start_release`
-- `train_end_release`
-- `dev_end_release`
-- `test_end_release`
-- `base_checkpoint`
-- `model_artifact`
-- `output_dir`
-- `seed`
-- `learning_rate`
-- `batch_size`
-- `gradient_accumulation_steps`
-- `num_train_epochs`
-- `job_time_limit`
-
-受け入れ基準:
-
-- W&B run page だけで benchmark version と dataset lineage が追える
-- sample table から artifact version に戻れる
-- eval と RL の reasoning trace が Weave 側から辿れる
-
-### 3.5 model / prediction artifact publish flow を仕様どおりに直す
-
-対象ファイル:
-
-- [register_research_assets.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/scripts/register_research_assets.py)
-- [materialize_model_source.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/scripts/materialize_model_source.py)
-- [research_registry.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/bioreason2/utils/research_registry.py)
-- [artifact_publish_registry.json](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/configs/disease_benchmark/artifact_publish_registry.json)
-- [wandb_asset_sources.env.example](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/configs/disease_benchmark/wandb_asset_sources.env.example)
-- [wandb_registry_paths.env.example](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/configs/disease_benchmark/wandb_registry_paths.env.example)
-
-現状のギャップ:
-
-- tuning 前の比較モデルを `bioreason-pro-rl-paper` に固定する運用がまだ曖昧
-- downstream 実行で local path と artifact ref が混ざりやすい
-- comparison model と custom tuned output の命名を分けておきたい
-
-やること:
-
-- `bioreason-pro-rl-paper` を public Hugging Face source `wanglab/bioreason-pro-rl` から download して W&B model artifact に publish する
-- `train_sft` と `train_rl` の output artifact は comparison model と別名で管理する
-- publish 後に `wandb_registry_paths.env` を自動更新する
-- source dir / HF repo ID は `wandb_asset_sources.env` から読む
-- downstream の eval / SFT / RL は W&B Artifact ref だけを source-of-truth とする
-
-受け入れ基準:
-
-- comparison model は 1 回の publish で W&B artifact 化できる
-- publish 成功後、対応する registry ref が `wandb_registry_paths.env` に入る
-- `bioreason-pro-rl-paper` の source が無い場合は明示的に fail する
-- comparison model と custom tuned output が別 ref で管理される
-
-### 3.6 eval を仕様どおりに直す
-
-対象ファイル:
-
-- [eval.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/eval.py)
-- [sh_eval.sh](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/scripts/sh_eval.sh)
-- [run_registered_eval.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/scripts/run_registered_eval.py)
-- [data_registry.json](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/configs/disease_benchmark/data_registry.json)
-- [eval_target_registry.json](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/configs/disease_benchmark/eval_target_registry.json)
-- [wandb_registry_paths.env.example](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/configs/disease_benchmark/wandb_registry_paths.env.example)
-
-現状のギャップ:
-
-- W&B Artifact ref manifest を読んで model / data を自動解決する高位 entry point が必要
-- CoreWeave では login node から `srun` / `sbatch` で投げる前提に README を寄せる必要がある
-- comparison model と custom tuned output を同じ entry point から評価できるようにしたい
-
-やること:
-
-- `validation` と `test` を切り替えられるようにする
-- `scripts/run_registered_eval.py` から data-bundle manifest と evaluation-target manifest を読む
-- data は W&B Artifact ref から解決する
-- model は W&B Artifact ref から解決する
-- `comparison-family`, `tuned-family`, `spec-comparison` の target group を評価できるようにする
-- metric を `wandb.log()` する
-- summary table を 1 evaluated target 1 row で `wandb.log()` する
-- sample-level table を 1 sample 1 row で `wandb.log()` する
-- reasoning task では `reasoning_full`, `final_answer`, `intermediate_trace` を保存する
-- JSON 結果を Artifact として version 管理する
-- ProteinLLM 系は `weave.Evaluation` の eval logger でも追跡する
-- local eval 出力は scratch 扱いにし、W&B 保存成功後は既定で cleanup する
-
-受け入れ基準:
-
-- 同じ target に対して `validation` と `test` を分けて評価できる
-- `scripts/run_registered_eval.py` だけで local model path / dataset path を手入力せずに評価を起動できる
-- `comparison-family` を一括で回せる
-- W&B 上に metric, summary table, sample table が残る
-- ProteinLLM 系では Weave 側に同一 eval run の追跡が残る
-- local eval 出力を保持したい場合だけ明示的に opt-in する
-
-### 3.7 SFT を仕様どおりに直す
-
-対象ファイル:
-
-- [train_protein_llm.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/train_protein_llm.py)
-- [sh_train_protein_qwen_staged.sh](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/scripts/sh_train_protein_qwen_staged.sh)
-
-やること:
-
-- `wandb.init(..., job_type="train_sft")` で開始する
-- `reasoning dataset` の `train` を学習に使う
-- `reasoning dataset` の `validation` を checkpoint selection に使う
-- `test` は学習に使わない
-- train / validation metric を `wandb.log()` する
-- 代表 sample を W&B Table に保存する
-- output checkpoint を Artifact に保存する
-- registry を使う場合は model artifact を昇格させる
-- `bioreason-pro-rl-paper` は W&B Artifact ref から解決し、前半フェーズと後半フェーズの両方で warm-start する
-- time limit を `12:00:00` にそろえる
-
-受け入れ基準:
-
-- run config から dataset version と benchmark version が分かる
-- run config から tuning 前の比較モデル artifact が分かる
-- best checkpoint と last checkpoint が区別できる
-- sample table に `reasoning` と `final_answer` がある
-
-### 3.8 RL を仕様どおりに直す
-
-対象ファイル:
-
-- RL 学習 entry point が未整備なら新規追加
-- 既存学習コードを流用する場合は [train_protein_llm.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/train_protein_llm.py) と新規 wrapper script
-
-やること:
-
-- `wandb.init(..., job_type="train_rl")` で開始する
-- benchmark の `train` split を rollout / reward 最適化に使う
-- `validation` を checkpoint selection と offline sanity-check に使う
-- `test` は学習に使わない
-- reward, KL, stability metric を `wandb.log()` する
-- rollout sample を W&B Table に保存する
-- rollout trace を Weave で保存する
-- output checkpoint を Artifact に保存する
-
-受け入れ基準:
-
-- RL run から benchmark version, dataset artifact, train_sft output checkpoint が追える
-- rollout sample と reward の関係が W&B / Weave の両方で監査できる
-- `test` split に由来する sample が RL 学習に混ざっていない
-
-## 4. 実装時に追加するテスト
-
-temporal split artifact の契約テストに続いて、次を順に追加する。
-
-### 4.1 dataset 化テスト
-
-- reasoning dataset の split 整合
-- `protein_id` 一致
-- optional field の空文字埋め
-- RL dataset が `train` のみ由来であること
-
-### 4.2 eval テスト
-
-- `validation` / `test` の切替
-- registry bundle / target の解決
-- W&B Registry ref の解決
-- target group 実行
-- summary table の列
-- sample-level table の列
-- reasoning 途中過程の保存
-- Artifact 出力
-
-### 4.3 model / prediction publish テスト
-
-- `wandb_asset_sources.env` の読み込み
-- public HF source の materialize
-- private / local dir source の materialize
-- registry env の自動更新
-- prediction artifact と model artifact の区別
-
-### 4.4 SFT テスト
+set -a
+source .env
+set +a
+
+cp configs/disease_benchmark/wandb_registry_paths.env.example \
+  configs/disease_benchmark/wandb_registry_paths.env
+
+cp configs/disease_benchmark/wandb_asset_sources.env.example \
+  configs/disease_benchmark/wandb_asset_sources.env
+```
+
+### 2.4 完了条件
+
+次が揃っていればこのフェーズは完了とする。
+
+- login node に入れる
+- `~/BioReason-Pro` に最新コードがある
+- `.venv-gpu` が作成済み
+- `wandb_registry_paths.env` に次が入っている
+  - `BIOREASON_MAIN_TEMPORAL_SPLIT_REGISTRY_PATH`
+  - `BIOREASON_MAIN_REASONING_DATASET_REGISTRY_PATH`
+  - `BIOREASON_RL_PAPER_MODEL_REGISTRY_PATH`
+
+## 3. 比較モデルの評価
+
+状態: **未着手**
+
+### 3.1 目的
+
+独自 tuning 前の比較モデル `bioreason-pro-rl-paper` を、現在採用している benchmark 上で `validation` split で評価する。
+
+### 3.2 評価対象
+
+- `comparison-family`: `bioreason-pro-rl-paper`
+- `tuned-family`: `train-sft-output`, `train-rl-output`
+- `spec-comparison`: 上記すべて
+
+この段階で実際に回すのは `comparison-family` のみでよい。
+
+### 3.3 実行コマンド
+
+```bash
+srun \
+  --partition <gpu_partition> \
+  --account <account_name> \
+  --gpus 1 \
+  --cpus-per-task 8 \
+  --mem 128G \
+  --time 12:00:00 \
+  bash -lc '
+    cd ~/BioReason-Pro &&
+    source .venv-gpu/bin/activate &&
+    uv run --active python scripts/run_registered_eval.py \
+      --target-group comparison-family \
+      --data-bundle main_production \
+      --split validation \
+      --wandb-entity "$WANDB_ENTITY" \
+      --wandb-project "$WANDB_PROJECT"
+  '
+```
+
+### 3.4 完了条件
+
+W&B 上に次が見えていれば完了とする。
+
+- `job_type=eval`
+- `fmax_mf`
+- `fmax_bp`
+- `fmax_cc`
+- `overall_mean_fmax`
+- `eval_summary` table
+- `eval_samples` table
+- eval artifact
+
+### 3.5 このフェーズが終わったらやること
+
+結果を確認し、SFT に進む。  
+この時点では `test` はまだ使わない。
+
+## 4. SFT
+
+状態: **未着手**
+
+### 4.1 目的
+
+`bioreason-pro-rl-paper` を初期値として、reasoning dataset の `train` split を使って SFT を行う。
+
+### 4.2 入力
+
+- temporal split artifact
+  - `BIOREASON_MAIN_TEMPORAL_SPLIT_REGISTRY_PATH`
+- reasoning dataset artifact
+  - `BIOREASON_MAIN_REASONING_DATASET_REGISTRY_PATH`
+- comparison model artifact
+  - `BIOREASON_RL_PAPER_MODEL_REGISTRY_PATH`
+
+### 4.3 実行コマンド
+
+```bash
+srun \
+  --partition <gpu_partition> \
+  --account <account_name> \
+  --gpus 8 \
+  --cpus-per-task 16 \
+  --mem 256G \
+  --time 12:00:00 \
+  bash -lc '
+    cd ~/BioReason-Pro &&
+    source .venv-gpu/bin/activate &&
+    bash scripts/sh_train_protein_qwen_staged.sh
+  '
+```
+
+### 4.4 固定ルール
+
+- 学習には `train` split を使う
+- checkpoint selection には `validation` split を使う
+- `test` split は使わない
+- `job_type=train_sft`
+- wall time は `12:00:00`
+
+### 4.5 完了条件
+
+W&B 上に次が揃っていれば完了とする。
 
 - `job_type=train_sft`
-- dataset artifact の読み込み
-- metric logging
-- sample table 生成
-- checkpoint artifact 生成
+- train / validation loss
+- sample table
+- output checkpoint artifact
 
-### 4.5 RL テスト
-
-- `job_type=train_rl`
-- reward logging
-- rollout sample table
-- Weave trace 生成
-- `test` split 非混入
-
-## 5. 実装の優先順位
-
-迷ったら次の順に進める。
-
-1. temporal split artifact の再現性を壊さない
-2. dataset の split 整合を固める
-3. eval を registry 駆動にして `validation` / `test` 切替可能にする
-4. W&B / Weave の lineage を入れる
-5. SFT を仕様どおりにする
-6. RL を仕様どおりにする
-
-## 6. 最終チェック
-
-実装が終わったら次を順に確認する。
-
-### 6.1 ローカルテスト
+完了後は `wandb_registry_paths.env` に次を追記する。
 
 ```bash
-.venv-contract-tests/bin/python -m unittest discover -s test -v
+export BIOREASON_TRAIN_SFT_MODEL_REGISTRY_PATH="entity/project/train-sft-output:alias"
 ```
 
-### 6.2 temporal split artifact の確認
+## 5. RL
 
-- `summary.json`
-- `report.md`
-- `*_assigned_labels.tsv`
-- `*_assigned_propagated.tsv`
-- `*_assigned_nk_lk.tsv`
-- `nk_lk_eda.tsv`
+状態: **未着手**
 
-### 6.3 W&B / Weave の確認
+### 5.1 目的
 
-- `eval`, `train_sft`, `train_rl` の `job_type`
-- dataset / model artifact の version
-- summary table
-- sample-level table
-- Weave trace / evaluation
-- registry file と run config の target family が一致している
+`train-sft-output` を canonical input として RL を行う。
 
-### 6.4 split leakage の確認
+### 5.2 固定ルール
 
-- train / validation / test の protein overlap が 0
-- RL dataset に validation / test 由来 sample が無い
-- final report に使う metric は `test` からのみ作られている
+- rollout / reward 最適化には `train` split を使う
+- checkpoint selection と offline sanity-check には `validation` split を使う
+- `test` split は使わない
+- `job_type=train_rl`
+- wall time は `12:00:00`
+- `bioreason-pro-rl-paper` から直接 RL を始める経路は ablation のみ
+
+### 5.3 現在の扱い
+
+RL の方針は確定済みだが、安定した実行 entry point はまだ未整備である。  
+そのため、現時点では **未着手** とする。
+
+### 5.4 完了条件
+
+次が揃っていれば完了とする。
+
+- `job_type=train_rl`
+- reward 系 metric
+- KL 系 metric
+- rollout trace
+- output checkpoint artifact
+
+完了後は `wandb_registry_paths.env` に次を追記する。
+
+```bash
+export BIOREASON_TRAIN_RL_MODEL_REGISTRY_PATH="entity/project/train-rl-output:alias"
+```
+
+## 6. 最終評価
+
+状態: **未着手**
+
+### 6.1 目的
+
+`spec-comparison` を `test` split で評価し、最終比較を出す。
+
+### 6.2 実行コマンド
+
+```bash
+srun \
+  --partition <gpu_partition> \
+  --account <account_name> \
+  --gpus 1 \
+  --cpus-per-task 8 \
+  --mem 128G \
+  --time 12:00:00 \
+  bash -lc '
+    cd ~/BioReason-Pro &&
+    source .venv-gpu/bin/activate &&
+    uv run --active python scripts/run_registered_eval.py \
+      --target-group spec-comparison \
+      --data-bundle main_production \
+      --split test \
+      --wandb-entity "$WANDB_ENTITY" \
+      --wandb-project "$WANDB_PROJECT"
+  '
+```
+
+### 6.3 完了条件
+
+W&B 上に次が揃っていれば完了とする。
+
+- comparison model と tuned model の `test` 指標
+- `eval_summary` table
+- `eval_samples` table
+- 最終 eval artifact
+
+## 7. 次アクション
+
+いま一番近い next action は次の 2 つである。
+
+1. CoreWeave 側で `.venv-gpu` と `wandb_registry_paths.env` を揃える
+2. `comparison-family` を `validation` split で評価する
