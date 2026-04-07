@@ -1,112 +1,19 @@
 {
   "default_asset_group": "all",
   "asset_groups": {
-    "prediction-baselines": [
-      "blast-diamond-baseline",
-      "esm-standalone-baseline"
-    ],
-    "model-family": [
-      "bioreason-pro-base",
-      "bioreason-pro-sft",
-      "bioreason-pro-rl"
+    "comparison-model-family": [
+      "bioreason-pro-rl-paper"
     ],
     "all": [
-      "blast-diamond-baseline",
-      "esm-standalone-baseline",
-      "bioreason-pro-base",
-      "bioreason-pro-sft",
-      "bioreason-pro-rl"
+      "bioreason-pro-rl-paper"
     ]
   },
   "assets": {
-    "blast-diamond-baseline": {
-      "display_name": "blast-diamond-baseline",
-      "artifact_name": "disease-temporal-blast-diamond-predictions",
-      "artifact_type": "predictions",
-      "registry_env_var": "BIOREASON_BLAST_DIAMOND_PRED_REGISTRY_PATH",
-      "artifact_aliases": [
-        "{benchmark_alias}"
-      ],
-      "sources": [
-        {
-          "type": "local_dir",
-          "local_dir": "${BIOREASON_BLAST_DIAMOND_PREDICTIONS_DIR}"
-        }
-      ]
-    },
-    "esm-standalone-baseline": {
-      "display_name": "esm-standalone-baseline",
-      "artifact_name": "disease-temporal-esm-standalone-predictions",
-      "artifact_type": "predictions",
-      "registry_env_var": "BIOREASON_ESM_STANDALONE_PRED_REGISTRY_PATH",
-      "artifact_aliases": [
-        "{benchmark_alias}"
-      ],
-      "sources": [
-        {
-          "type": "local_dir",
-          "local_dir": "${BIOREASON_ESM_STANDALONE_PREDICTIONS_DIR}"
-        }
-      ]
-    },
-    "bioreason-pro-base": {
-      "display_name": "bioreason-pro-base",
-      "artifact_name": "bioreason-pro-base",
-      "artifact_type": "model",
-      "registry_env_var": "BIOREASON_BASE_MODEL_REGISTRY_PATH",
-      "artifact_aliases": [
-        "production"
-      ],
-      "sources": [
-        {
-          "type": "local_dir",
-          "local_dir": "${BIOREASON_BASE_MODEL_SOURCE_DIR}",
-          "required_paths": [
-            "config.json"
-          ]
-        },
-        {
-          "type": "huggingface",
-          "repo_id_env": "BIOREASON_PRO_BASE_HF_REPO",
-          "local_dir": "data/artifacts/models/bioreason_pro_base",
-          "required_paths": [
-            "config.json"
-          ]
-        }
-      ]
-    },
-    "bioreason-pro-sft": {
-      "display_name": "bioreason-pro-sft",
-      "artifact_name": "bioreason-pro-sft",
-      "artifact_type": "model",
-      "registry_env_var": "BIOREASON_SFT_MODEL_REGISTRY_PATH",
-      "artifact_aliases": [
-        "production",
-        "{benchmark_alias}"
-      ],
-      "sources": [
-        {
-          "type": "local_dir",
-          "local_dir": "${BIOREASON_SFT_MODEL_SOURCE_DIR}",
-          "required_paths": [
-            "config.json"
-          ]
-        },
-        {
-          "type": "huggingface",
-          "repo_id_env": "BIOREASON_PRO_SFT_HF_REPO",
-          "local_dir": "data/artifacts/models/bioreason_pro_sft",
-          "required_paths": [
-            "config.json"
-          ]
-        }
-      ]
-    },
-    "bioreason-pro-rl": {
-      "display_name": "bioreason-pro-rl",
+    "bioreason-pro-rl-paper": {
+      "display_name": "bioreason-pro-rl-paper",
       "artifact_name": "bioreason-pro-rl",
       "artifact_type": "model",
-      "registry_env_var": "BIOREASON_RL_MODEL_REGISTRY_PATH",
+      "registry_env_var": "BIOREASON_RL_PAPER_MODEL_REGISTRY_PATH",
       "artifact_aliases": [
         "production",
         "{benchmark_alias}"
@@ -114,7 +21,7 @@
       "sources": [
         {
           "type": "local_dir",
-          "local_dir": "${BIOREASON_RL_MODEL_SOURCE_DIR}",
+          "local_dir": "${BIOREASON_RL_PAPER_MODEL_SOURCE_DIR}",
           "required_paths": [
             "config.json"
           ]
@@ -122,7 +29,7 @@
         {
           "type": "huggingface",
           "repo_id_env": "BIOREASON_PRO_RL_HF_REPO",
-          "local_dir": "data/artifacts/models/bioreason_pro_rl",
+          "local_dir": "data/artifacts/models/bioreason_pro_rl_paper",
           "required_paths": [
             "config.json"
           ]

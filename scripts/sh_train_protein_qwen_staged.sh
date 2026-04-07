@@ -52,7 +52,7 @@ EXPERIMENT_NAME="reasoning-sft"
 MODEL_SOURCE_RESOLVER=${MODEL_SOURCE_RESOLVER:-"scripts/materialize_model_source.py"}
 
 # --- Paths: Set these to your local directories ---
-BASE_CHECKPOINT_DIR=${BASE_CHECKPOINT_DIR:-"data/artifacts/models/bioreason_pro_base"}
+BASE_CHECKPOINT_DIR=${BASE_CHECKPOINT_DIR:-"data/artifacts/models/bioreason_pro_rl_paper"}
 DATASET_CACHE_DIR=${DATASET_CACHE_DIR:-"data/artifacts/hf_cache"}
 CACHE_DIR=${CACHE_DIR:-"data/artifacts/cache"}
 STRUCTURE_DIR=${STRUCTURE_DIR:-"data/structures"}
@@ -76,7 +76,7 @@ TEMPORAL_SPLIT_ARTIFACT=${TEMPORAL_SPLIT_ARTIFACT:-"${BIOREASON_MAIN_TEMPORAL_SP
 DATASET_CONFIG="disease_temporal_hc_reasoning_v1"
 REASONING_DATASET_CONFIG="disease_temporal_hc_reasoning_v1"
 DATASET_ARTIFACT=${DATASET_ARTIFACT:-"${BIOREASON_MAIN_REASONING_DATASET_REGISTRY_PATH:-}"}
-BASE_CHECKPOINT=${BASE_CHECKPOINT:-"${BIOREASON_BASE_MODEL_REGISTRY_PATH:-}"}
+BASE_CHECKPOINT=${BASE_CHECKPOINT:-"${BIOREASON_RL_PAPER_MODEL_REGISTRY_PATH:-}"}
 SHORTLIST_MODE="high-confidence"
 SHORTLIST_QUERY="reviewed:true AND organism_id:9606 AND cc_disease:* AND (xref:mim-* OR xref:orphanet-*) AND (go_exp:* OR go_ida:* OR go_ipi:* OR go_igi:* OR go_imp:* OR go_iep:* OR go_ic:* OR go_tas:*)"
 TRAIN_START_RELEASE=213
@@ -99,11 +99,11 @@ PPI_IN_PROMPT=True
 
 RESOLVED_BASE_MODEL_DIR=""
 if [ -z "$BASE_CHECKPOINT" ]; then
-  echo "Error: BASE_CHECKPOINT is not set. Publish and register bioreason-pro-base first."
+  echo "Error: BASE_CHECKPOINT is not set. Set BIOREASON_RL_PAPER_MODEL_REGISTRY_PATH first."
   exit 1
 fi
 
-echo "--- Resolving base model source for SFT from W&B Registry"
+echo "--- Resolving pretuning comparison model source for SFT from W&B Registry"
 RESOLVED_BASE_MODEL_DIR=$(python "$MODEL_SOURCE_RESOLVER" \
   --wandb-registry-path "$BASE_CHECKPOINT" \
   --local-dir "$BASE_CHECKPOINT_DIR" \
@@ -113,7 +113,7 @@ if [ -z "$RESOLVED_BASE_MODEL_DIR" ]; then
   exit 1
 fi
 TEXT_MODEL_NAME="$RESOLVED_BASE_MODEL_DIR"
-echo "--- Base model materialized at $RESOLVED_BASE_MODEL_DIR"
+echo "--- Pretuning comparison model materialized at $RESOLVED_BASE_MODEL_DIR"
 
 BASE_MODEL_PROJECTOR_WEIGHTS_PATH="${RESOLVED_BASE_MODEL_DIR:+$RESOLVED_BASE_MODEL_DIR/protein_projection.pt}"
 BASE_MODEL_GO_PROJECTOR_WEIGHTS_PATH="${RESOLVED_BASE_MODEL_DIR:+$RESOLVED_BASE_MODEL_DIR/go_projection.pt}"

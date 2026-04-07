@@ -208,25 +208,24 @@
 
 現状のギャップ:
 
-- public checkpoint を一度 materialize して W&B model artifact に固定するフローが弱い
-- downstream 実行で local path と registry ref が混ざりやすい
-- BLAST / Diamond と ESM 系単体は prediction artifact であることを publish flow に明示したい
+- tuning 前の比較モデルを `bioreason-pro-rl-paper` に固定する運用がまだ曖昧
+- downstream 実行で local path と artifact ref が混ざりやすい
+- comparison model と custom tuned output の命名を分けておきたい
 
 やること:
 
-- `BioReason-Pro SFT` と `BioReason-Pro RL` を public Hugging Face source から download して W&B model artifact に publish する
-- `BioReason-Pro base` は private / local checkpoint dir から W&B model artifact に publish する
-- `BLAST / Diamond` と `ESM 系単体` は prediction dir から W&B prediction artifact に publish する
+- `bioreason-pro-rl-paper` を public Hugging Face source `wanglab/bioreason-pro-rl` から download して W&B model artifact に publish する
+- `train_sft` と `train_rl` の output artifact は comparison model と別名で管理する
 - publish 後に `wandb_registry_paths.env` を自動更新する
 - source dir / HF repo ID は `wandb_asset_sources.env` から読む
-- downstream の eval / SFT / RL は W&B Registry ref だけを source-of-truth とする
+- downstream の eval / SFT / RL は W&B Artifact ref だけを source-of-truth とする
 
 受け入れ基準:
 
-- public model は 1 回の publish で W&B artifact 化できる
+- comparison model は 1 回の publish で W&B artifact 化できる
 - publish 成功後、対応する registry ref が `wandb_registry_paths.env` に入る
-- `BioReason-Pro base` の source が無い場合は明示的に fail する
-- baseline 2 系統は checkpoint 扱いではなく prediction artifact として登録される
+- `bioreason-pro-rl-paper` の source が無い場合は明示的に fail する
+- comparison model と custom tuned output が別 ref で管理される
 
 ### 3.6 eval を仕様どおりに直す
 
@@ -241,18 +240,17 @@
 
 現状のギャップ:
 
-- W&B Registry path manifest を読んで model / data を自動解決する高位 entry point が必要
+- W&B Artifact ref manifest を読んで model / data を自動解決する高位 entry point が必要
 - CoreWeave では login node から `srun` / `sbatch` で投げる前提に README を寄せる必要がある
-- 比較対象 4 系統のうち、BLAST / Diamond と ESM 系単体は prediction artifact で評価する経路が必要
+- comparison model と custom tuned output を同じ entry point から評価できるようにしたい
 
 やること:
 
 - `validation` と `test` を切り替えられるようにする
 - `scripts/run_registered_eval.py` から data-bundle manifest と evaluation-target manifest を読む
-- data は W&B Registry path から解決する
-- model は W&B Registry path から解決する
-- `base-family`, `tuned-family`, `spec-comparison` の target group を評価できるようにする
-- BLAST / Diamond と ESM 系単体は prediction artifact を直接 F_max 評価できるようにする
+- data は W&B Artifact ref から解決する
+- model は W&B Artifact ref から解決する
+- `comparison-family`, `tuned-family`, `spec-comparison` の target group を評価できるようにする
 - metric を `wandb.log()` する
 - summary table を 1 evaluated target 1 row で `wandb.log()` する
 - sample-level table を 1 sample 1 row で `wandb.log()` する
@@ -265,7 +263,7 @@
 
 - 同じ target に対して `validation` と `test` を分けて評価できる
 - `scripts/run_registered_eval.py` だけで local model path / dataset path を手入力せずに評価を起動できる
-- `base-family` を一括で回せる
+- `comparison-family` を一括で回せる
 - W&B 上に metric, summary table, sample table が残る
 - ProteinLLM 系では Weave 側に同一 eval run の追跡が残る
 - local eval 出力を保持したい場合だけ明示的に opt-in する
@@ -287,13 +285,13 @@
 - 代表 sample を W&B Table に保存する
 - output checkpoint を Artifact に保存する
 - registry を使う場合は model artifact を昇格させる
-- base model は W&B Registry ref から解決し、前半フェーズと後半フェーズの両方で warm-start する
+- `bioreason-pro-rl-paper` は W&B Artifact ref から解決し、前半フェーズと後半フェーズの両方で warm-start する
 - time limit を `12:00:00` にそろえる
 
 受け入れ基準:
 
 - run config から dataset version と benchmark version が分かる
-- run config から base model artifact が分かる
+- run config から tuning 前の比較モデル artifact が分かる
 - best checkpoint と last checkpoint が区別できる
 - sample table に `reasoning` と `final_answer` がある
 
@@ -317,7 +315,7 @@
 
 受け入れ基準:
 
-- RL run から benchmark version, dataset artifact, base or SFT checkpoint が追える
+- RL run から benchmark version, dataset artifact, train_sft output checkpoint が追える
 - rollout sample と reward の関係が W&B / Weave の両方で監査できる
 - `test` split に由来する sample が RL 学習に混ざっていない
 

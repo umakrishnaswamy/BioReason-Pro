@@ -1,87 +1,57 @@
 {
   "target_groups": {
-    "base-family": [
-      "blast-diamond-baseline",
-      "esm-standalone-baseline",
-      "bioreason-pro-base"
+    "comparison-family": [
+      "bioreason-pro-rl-paper"
     ],
     "tuned-family": [
-      "bioreason-pro-sft",
-      "bioreason-pro-rl"
+      "train-sft-output",
+      "train-rl-output"
     ],
     "spec-comparison": [
-      "blast-diamond-baseline",
-      "esm-standalone-baseline",
-      "bioreason-pro-base",
-      "bioreason-pro-sft",
-      "bioreason-pro-rl"
+      "bioreason-pro-rl-paper",
+      "train-sft-output",
+      "train-rl-output"
     ]
   },
   "targets": {
-    "blast-diamond-baseline": {
-      "display_name": "blast-diamond-baseline",
-      "runner": "prediction_artifact",
-      "optional": true,
-      "prediction_glob": "*.tsv",
-      "prediction_sources": [
-        {
-          "type": "wandb_artifact",
-          "wandb_registry_path": "${BIOREASON_BLAST_DIAMOND_PRED_REGISTRY_PATH}",
-          "local_dir": "data/artifacts/predictions/blast_diamond/{benchmark_alias_dir}"
-        }
-      ]
-    },
-    "esm-standalone-baseline": {
-      "display_name": "esm-standalone-baseline",
-      "runner": "prediction_artifact",
-      "optional": true,
-      "prediction_glob": "*.tsv",
-      "prediction_sources": [
-        {
-          "type": "wandb_artifact",
-          "wandb_registry_path": "${BIOREASON_ESM_STANDALONE_PRED_REGISTRY_PATH}",
-          "local_dir": "data/artifacts/predictions/esm_standalone/{benchmark_alias_dir}"
-        }
-      ]
-    },
-    "bioreason-pro-base": {
-      "display_name": "bioreason-pro-base",
+    "bioreason-pro-rl-paper": {
+      "display_name": "bioreason-pro-rl-paper",
       "runner": "protein_llm",
       "model_sources": [
         {
           "type": "wandb_artifact",
-          "wandb_registry_path": "${BIOREASON_BASE_MODEL_REGISTRY_PATH}",
-          "local_dir": "data/artifacts/models/bioreason_pro_base",
+          "wandb_registry_path": "${BIOREASON_RL_PAPER_MODEL_REGISTRY_PATH}",
+          "local_dir": "data/artifacts/models/bioreason_pro_rl_paper",
           "required_paths": [
             "config.json"
           ]
         }
       ]
     },
-    "bioreason-pro-sft": {
-      "display_name": "bioreason-pro-sft",
+    "train-sft-output": {
+      "display_name": "train-sft-output",
       "runner": "protein_llm",
       "optional": true,
       "model_sources": [
         {
           "type": "wandb_artifact",
-          "wandb_registry_path": "${BIOREASON_SFT_MODEL_REGISTRY_PATH}",
-          "local_dir": "data/artifacts/models/bioreason_pro_sft",
+          "wandb_registry_path": "${BIOREASON_TRAIN_SFT_MODEL_REGISTRY_PATH}",
+          "local_dir": "data/artifacts/models/train_sft_output",
           "required_paths": [
             "config.json"
           ]
         }
       ]
     },
-    "bioreason-pro-rl": {
-      "display_name": "bioreason-pro-rl",
+    "train-rl-output": {
+      "display_name": "train-rl-output",
       "runner": "protein_llm",
       "optional": true,
       "model_sources": [
         {
           "type": "wandb_artifact",
-          "wandb_registry_path": "${BIOREASON_RL_MODEL_REGISTRY_PATH}",
-          "local_dir": "data/artifacts/models/bioreason_pro_rl",
+          "wandb_registry_path": "${BIOREASON_TRAIN_RL_MODEL_REGISTRY_PATH}",
+          "local_dir": "data/artifacts/models/train_rl_output",
           "required_paths": [
             "config.json"
           ]
