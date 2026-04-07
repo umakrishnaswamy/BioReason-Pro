@@ -339,7 +339,9 @@ W&B run は `wandb.init(..., job_type="train_sft")` で開始する。
 - checkpoint selection には `validation` split を使う
 - `test` split は SFT 学習に使わない
 - tuning 前の比較モデルは W&B Artifact ref から materialize して使う
-- 前半フェーズと後半フェーズの両方で、比較モデルに含まれる projector / GO module 重みを warm-start に使ってよい
+- canonical な SFT 実行は **stage 2 only** とする
+- canonical では、比較モデルに含まれる projector / GO module 重みをそのまま warm-start として使う
+- stage 1 の projector warm-up は、学習不安定時の fallback または ablation としてのみ扱う
 - train / validation metric を `wandb.log()` で保存する
 - sample table を W&B Table として保存する
 - output checkpoint を W&B Artifact として登録する
@@ -359,6 +361,7 @@ W&B run は `wandb.init(..., job_type="train_sft")` で開始する。
 ### 9.1 train_rl phase
 
 RL の論理フェーズ名は `train_rl` に固定する。  
+entry point は `train_protein_grpo.py` と `scripts/sh_train_protein_grpo.sh` に固定する。  
 W&B run は `wandb.init(..., job_type="train_rl")` で開始する。
 
 ### 9.2 入力と厳格ルール
@@ -375,6 +378,8 @@ W&B run は `wandb.init(..., job_type="train_rl")` で開始する。
 - checkpoint selection と offline sanity-check には `validation` split を使う
 - `test` split は RL 学習に使わない
 - RL 用 dataset を派生生成する場合も、元データは `train` split のみから作る
+- canonical input は `train-sft-output` artifact
+- `train-sft-output` artifact が raw Lightning checkpoint のみを含む場合、RL 開始前に HF model へ変換してから使う
 - `bioreason-pro-rl-paper` から直接 RL を始める経路は、必要な場合に限って ablation として扱う
 - reward 系 metric、KL 系 metric、学習安定性指標を `wandb.log()` で保存する
 - rollout trace は Weave で保存する
@@ -388,3 +393,4 @@ W&B run は `wandb.init(..., job_type="train_rl")` で開始する。
 - 学習ジョブの wall time は最大 12 時間
 - submission 時の time limit は `12:00:00`
 - checkpoint / resume 前提で運用する
+- local output directory は scratch とみなし、正本は W&B Artifact ref とする

@@ -28,7 +28,7 @@
 | CoreWeave 実行フロー整理 | 準備済み | `srun` ベースの実行手順は文書化済み、実機 run は未実施 |
 | comparison model の validation 評価 | 未着手 | 次の実行対象 |
 | SFT | 未着手 | wrapper と tracking は用意済み、run は未実施 |
-| RL | 未着手 | 方針は固定済み、実行 entry point は未整備 |
+| RL | 準備済み | `train_protein_grpo.py` と `scripts/sh_train_protein_grpo.sh` は実装済み、run は未実施 |
 
 ### 0.3 いま次にやること
 
@@ -231,6 +231,7 @@ W&B 上に次が見えていれば完了とする。
 ### 4.1 目的
 
 `bioreason-pro-rl-paper` を初期値として、reasoning dataset の `train` split を使って SFT を行う。
+canonical run は **stage 2 only** とし、comparison model に含まれる projector / GO module 重みをそのまま warm-start として使う。
 
 ### 4.2 入力
 
@@ -244,19 +245,13 @@ W&B 上に次が見えていれば完了とする。
 ### 4.3 実行コマンド
 
 ```bash
-srun \
-  --partition <gpu_partition> \
-  --account <account_name> \
-  --gpus 8 \
-  --cpus-per-task 16 \
-  --mem 256G \
-  --time 12:00:00 \
-  bash -lc '
-    cd ~/BioReason-Pro &&
-    source .venv-gpu/bin/activate &&
-    bash scripts/sh_train_protein_qwen_staged.sh
-  '
+cd ~/BioReason-Pro
+source .venv-gpu/bin/activate
+
+bash scripts/sh_train_protein_qwen_staged.sh
 ```
+
+この wrapper は内部で `srun python train_protein_llm.py ...` を呼ぶ。
 
 ### 4.4 固定ルール
 
@@ -265,6 +260,8 @@ srun \
 - `test` split は使わない
 - `job_type=train_sft`
 - wall time は `12:00:00`
+- canonical は `stage 2 only`
+- `RUN_STAGE1=true` は fallback / ablation のときだけ使う
 
 ### 4.5 完了条件
 
@@ -283,7 +280,7 @@ export BIOREASON_TRAIN_SFT_MODEL_REGISTRY_PATH="entity/project/train-sft-output:
 
 ## 5. RL
 
-状態: **未着手**
+状態: **準備済み、run は未実施**
 
 ### 5.1 目的
 
@@ -298,10 +295,17 @@ export BIOREASON_TRAIN_SFT_MODEL_REGISTRY_PATH="entity/project/train-sft-output:
 - wall time は `12:00:00`
 - `bioreason-pro-rl-paper` から直接 RL を始める経路は ablation のみ
 
-### 5.3 現在の扱い
+### 5.3 実行コマンド
 
-RL の方針は確定済みだが、安定した実行 entry point はまだ未整備である。  
-そのため、現時点では **未着手** とする。
+```bash
+cd ~/BioReason-Pro
+source .venv-gpu/bin/activate
+
+bash scripts/sh_train_protein_grpo.sh
+```
+
+この wrapper は内部で `srun python train_protein_grpo.py ...` を呼ぶ。  
+canonical には `BIOREASON_TRAIN_SFT_MODEL_REGISTRY_PATH` を使い、raw SFT checkpoint artifact しか無い場合は HF model へ変換してから RL を始める。
 
 ### 5.4 完了条件
 

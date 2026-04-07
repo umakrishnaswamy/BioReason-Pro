@@ -360,25 +360,20 @@ SFT の入力は次で固定する。
 
 SFT は reasoning dataset の `train` を学習に使い、`validation` で checkpoint selection を行う。  
 `test` は最終評価専用であり、SFT 学習には使わない。
+canonical run は **stage 2 only** とし、comparison model に含まれる projector / GO module 重みをそのまま warm-start として使う。
 
 ### 4.2 実行コマンド
 
 ```bash
-srun \
-  --partition <gpu_partition> \
-  --account <account_name> \
-  --gpus 8 \
-  --cpus-per-task 16 \
-  --mem 256G \
-  --time 12:00:00 \
-  bash -lc '
-    cd ~/BioReason-Pro &&
-    source .venv-gpu/bin/activate &&
-    bash scripts/sh_train_protein_qwen_staged.sh
-  '
+cd ~/BioReason-Pro
+source .venv-gpu/bin/activate
+
+bash scripts/sh_train_protein_qwen_staged.sh
 ```
 
-この wrapper は、比較モデルを初期値として使い、前半フェーズと後半フェーズの 2 段で SFT を行う。
+この wrapper は内部で `srun python train_protein_llm.py ...` を呼ぶ。  
+comparison model を初期値として使い、既定では **stage 2 only** で SFT を行う。  
+`RUN_STAGE1=true` を明示したときだけ、projector warm-up を先に回す。
 
 ### 4.3 実行後にやること
 
@@ -405,20 +400,36 @@ export BIOREASON_TRAIN_SFT_MODEL_REGISTRY_PATH="entity/project/train-sft-output:
 RL は `train_rl` phase として扱う。  
 canonical input は `train-sft-output` checkpoint である。
 
-現時点では repo に安定した RL 実行 entry point がまだ揃っていないため、**今すぐ回す対象はデータ準備、比較モデル評価、SFT まで**とする。  
-ただし運用ルールは次で固定する。
+entry point は [train_protein_grpo.py](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/train_protein_grpo.py) と [sh_train_protein_grpo.sh](/Users/keisuke/Project/learning/drug_discovery/BioReason-Pro/scripts/sh_train_protein_grpo.sh) に固定する。  
+運用ルールは次で固定する。
 
 - RL の rollout / reward 最適化には benchmark の `train` split を使う
 - checkpoint selection と offline sanity-check には `validation` split を使う
 - `test` split は RL 学習に使わない
 - RL 用派生 dataset を作る場合も、元データは `train` split のみから作る
 - `bioreason-pro-rl-paper` から直接 RL を始める経路は ablation としてのみ扱う
+- canonical input は `BIOREASON_TRAIN_SFT_MODEL_REGISTRY_PATH` が指す `train-sft-output` artifact
+- `train-sft-output` artifact が raw Lightning checkpoint のみを含む場合、wrapper が paper RL model を土台に HF model へ変換してから RL を始める
 
 RL checkpoint artifact ができたら、その ref を `configs/disease_benchmark/wandb_registry_paths.env` に追記する。
 
 ```bash
 export BIOREASON_TRAIN_RL_MODEL_REGISTRY_PATH="entity/project/train-rl-output:alias"
 ```
+
+### 5.1 実行コマンド
+
+```bash
+cd ~/BioReason-Pro
+source .venv-gpu/bin/activate
+
+bash scripts/sh_train_protein_grpo.sh
+```
+
+この wrapper は内部で `srun python train_protein_grpo.py ...` を呼ぶ。  
+canonical には `BIOREASON_TRAIN_SFT_MODEL_REGISTRY_PATH` を使い、必要なら raw SFT checkpoint を HF model に変換してから RL を始める。
+
+### 5.2 RL 後の評価
 
 その後は `spec-comparison` を `test` split で評価する。
 
@@ -454,5 +465,7 @@ srun \
 6. `comparison-family` を `validation` で評価する
 7. SFT を回す
 8. `BIOREASON_TRAIN_SFT_MODEL_REGISTRY_PATH` を更新する
-9. `tuned-family` または `spec-comparison` を評価する
-10. RL entry point が整ったら `train-sft-output` を初期値にして RL に進む
+9. `tuned-family` を `validation` で評価する
+10. `train-sft-output` を初期値にして RL に進む
+11. `BIOREASON_TRAIN_RL_MODEL_REGISTRY_PATH` を更新する
+12. `spec-comparison` を `test` で評価する

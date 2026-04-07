@@ -117,7 +117,10 @@ def build_training_tracking_config(args: Any, run_name: str, job_type: Optional[
             _get_arg(args, "projector_checkpoint_path"),
         ),
         "model_artifact": output_model_artifact,
-        "output_dir": normalize_text(_get_arg(args, "checkpoint_dir")),
+        "output_dir": first_non_empty(
+            _get_arg(args, "checkpoint_dir"),
+            _get_arg(args, "output_dir"),
+        ),
         "seed": _get_arg(args, "seed"),
         "learning_rate": _get_arg(args, "learning_rate"),
         "batch_size": _get_arg(args, "batch_size"),
@@ -172,7 +175,10 @@ def build_checkpoint_artifact_metadata(
     metadata.update(
         {
             "run_name": run_name,
-            "checkpoint_dir": normalize_text(_get_arg(args, "checkpoint_dir")),
+            "checkpoint_dir": first_non_empty(
+                _get_arg(args, "checkpoint_dir"),
+                _get_arg(args, "output_dir"),
+            ),
             "training_stage": _get_arg(args, "training_stage"),
         }
     )

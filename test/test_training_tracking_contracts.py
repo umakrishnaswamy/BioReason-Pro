@@ -70,6 +70,7 @@ class TrainingTrackingContractsTest(unittest.TestCase):
             model_artifact=None,
             checkpoint_artifact_name="disease-sft-checkpoints",
             checkpoint_dir="checkpoints/disease-sft",
+            output_dir=None,
             seed=23,
             learning_rate=1e-4,
             batch_size=4,
@@ -97,6 +98,48 @@ class TrainingTrackingContractsTest(unittest.TestCase):
         self.assertEqual(config["model_artifact"], "disease-sft-checkpoints")
         self.assertEqual(config["job_time_limit"], "12:00:00")
         self.assertEqual(config["num_train_epochs"], 10)
+
+    def test_build_training_tracking_config_uses_output_dir_when_checkpoint_dir_missing(self):
+        args = types.SimpleNamespace(
+            wandb_job_type="train_rl",
+            benchmark_version="213 -> 221 -> 225 -> 228",
+            temporal_split_artifact="wandb-healthcare/project/disease-temporal-split:production",
+            dataset_config="disease_temporal_hc_reasoning_v1",
+            reasoning_dataset_config="disease_temporal_hc_reasoning_v1",
+            dataset_artifact="wandb-healthcare/project/disease-temporal-reasoning:production",
+            shortlist_query="reviewed:true",
+            shortlist_mode="high-confidence",
+            train_start_release=213,
+            train_end_release=221,
+            dev_end_release=225,
+            test_end_release=228,
+            base_checkpoint="wandb-healthcare/project/train-sft-output:latest",
+            model_artifact="train-rl-output",
+            checkpoint_artifact_name="train-rl-output",
+            checkpoint_dir=None,
+            output_dir="data/artifacts/models/train_rl_output/demo",
+            seed=23,
+            learning_rate=5e-6,
+            batch_size=1,
+            gradient_accumulation_steps=1,
+            max_epochs=1,
+            job_time_limit="12:00:00",
+            training_stage=None,
+            cafa5_dataset_name="disease_temporal_hc_reasoning_v1",
+            reasoning_dataset_name="disease_temporal_hc_reasoning_v1",
+            ckpt_path=None,
+            projector_checkpoint_path=None,
+        )
+
+        config = TRACKING.build_training_tracking_config(args, run_name="train-rl-demo")
+        metadata = TRACKING.build_checkpoint_artifact_metadata(
+            args,
+            run_name="train-rl-demo",
+            tracking_config=config,
+        )
+
+        self.assertEqual(config["output_dir"], "data/artifacts/models/train_rl_output/demo")
+        self.assertEqual(metadata["checkpoint_dir"], "data/artifacts/models/train_rl_output/demo")
 
     def test_build_sft_sample_row_is_one_row_per_sample(self):
         batch = {

@@ -40,6 +40,13 @@ export PYTHONDONTWRITEBYTECODE=1
 unset SLURM_TRES_PER_TASK
 # ===================================================================================================
 
+as_bool() {
+  case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|t|yes|y) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 
 
 # ===================================================================================================
@@ -118,6 +125,7 @@ echo "--- Pretuning comparison model materialized at $RESOLVED_BASE_MODEL_DIR"
 BASE_MODEL_PROJECTOR_WEIGHTS_PATH="${RESOLVED_BASE_MODEL_DIR:+$RESOLVED_BASE_MODEL_DIR/protein_projection.pt}"
 BASE_MODEL_GO_PROJECTOR_WEIGHTS_PATH="${RESOLVED_BASE_MODEL_DIR:+$RESOLVED_BASE_MODEL_DIR/go_projection.pt}"
 BASE_MODEL_GO_ENCODER_WEIGHTS_PATH="${RESOLVED_BASE_MODEL_DIR:+$RESOLVED_BASE_MODEL_DIR/go_encoder.pt}"
+RUN_STAGE1=${RUN_STAGE1:-"False"}
 
 
 BASE_COMMAND="srun python train_protein_llm.py \
@@ -201,47 +209,55 @@ BASE_COMMAND="srun python train_protein_llm.py \
 
 
 # ===================================================================================================
-# --- Stage 1: Warm-up (Projector + GO Training) ---
+# --- Optional Stage 1: Warm-up (Projector + GO Training) ---
 # ===================================================================================================
-echo "--- Starting Stage 1: Projector Training"
+PROJECTOR_WEIGHTS_PATH="$BASE_MODEL_PROJECTOR_WEIGHTS_PATH"
+GO_PROJECTOR_WEIGHTS_PATH="$BASE_MODEL_GO_PROJECTOR_WEIGHTS_PATH"
+GO_ENCODER_WEIGHTS_PATH="$BASE_MODEL_GO_ENCODER_WEIGHTS_PATH"
 
-RUN_NAME_S1_DIR="${BASE_WANDB_PROJECT}-$(basename ${TEXT_MODEL_NAME})-stage1"
-TIMESTAMP_S1=$(date +%Y%m%d-%H%M%S)
-STAGE1_CHECKPOINT_DIR="${BASE_CHECKPOINT_DIR}/${RUN_NAME_S1_DIR}-${TIMESTAMP_S1}"
-WANDB_RUN_NAME_S1="stage1-$(basename ${TEXT_MODEL_NAME})-${EXPERIMENT_NAME}"
-mkdir -p $STAGE1_CHECKPOINT_DIR
+if as_bool "$RUN_STAGE1"; then
+  echo "--- Starting optional Stage 1: Projector Training"
 
-stdbuf -oL -eL $BASE_COMMAND \
-  ${BASE_MODEL_PROJECTOR_WEIGHTS_PATH:+--projector_checkpoint_path "$BASE_MODEL_PROJECTOR_WEIGHTS_PATH"} \
-  ${BASE_MODEL_GO_PROJECTOR_WEIGHTS_PATH:+--go_projection_checkpoint_path "$BASE_MODEL_GO_PROJECTOR_WEIGHTS_PATH"} \
-  ${BASE_MODEL_GO_ENCODER_WEIGHTS_PATH:+--go_encoder_checkpoint_path "$BASE_MODEL_GO_ENCODER_WEIGHTS_PATH"} \
-  --run_name "${WANDB_RUN_NAME_S1}" \
-  --checkpoint_artifact_name "${WANDB_RUN_NAME_S1}-checkpoints" \
-  --cafa5_dataset_name $STAGE1_DATASET_NAME \
-  --training_stage 1 \
-  --max_epochs 1 \
-  --learning_rate 1e-4 \
-  --warmup_ratio 0.1 \
-  --text_model_finetune False \
-  --checkpoint_dir $STAGE1_CHECKPOINT_DIR \
-  --wandb_project "${BASE_WANDB_PROJECT}-stage1"
+  RUN_NAME_S1_DIR="${BASE_WANDB_PROJECT}-$(basename ${TEXT_MODEL_NAME})-stage1"
+  TIMESTAMP_S1=$(date +%Y%m%d-%H%M%S)
+  STAGE1_CHECKPOINT_DIR="${BASE_CHECKPOINT_DIR}/${RUN_NAME_S1_DIR}-${TIMESTAMP_S1}"
+  WANDB_RUN_NAME_S1="stage1-$(basename ${TEXT_MODEL_NAME})-${EXPERIMENT_NAME}"
+  mkdir -p $STAGE1_CHECKPOINT_DIR
 
-PROJECTOR_WEIGHTS_PATH="$STAGE1_CHECKPOINT_DIR/projector_weights.pt"
-if [ ! -f "$PROJECTOR_WEIGHTS_PATH" ]; then
-  echo "Error: Stage 1 failed. Projector weights not found at $PROJECTOR_WEIGHTS_PATH"
-  exit 1
+  stdbuf -oL -eL $BASE_COMMAND \
+    ${BASE_MODEL_PROJECTOR_WEIGHTS_PATH:+--projector_checkpoint_path "$BASE_MODEL_PROJECTOR_WEIGHTS_PATH"} \
+    ${BASE_MODEL_GO_PROJECTOR_WEIGHTS_PATH:+--go_projection_checkpoint_path "$BASE_MODEL_GO_PROJECTOR_WEIGHTS_PATH"} \
+    ${BASE_MODEL_GO_ENCODER_WEIGHTS_PATH:+--go_encoder_checkpoint_path "$BASE_MODEL_GO_ENCODER_WEIGHTS_PATH"} \
+    --run_name "${WANDB_RUN_NAME_S1}" \
+    --checkpoint_artifact_name "${WANDB_RUN_NAME_S1}-checkpoints" \
+    --cafa5_dataset_name $STAGE1_DATASET_NAME \
+    --training_stage 1 \
+    --max_epochs 1 \
+    --learning_rate 1e-4 \
+    --warmup_ratio 0.1 \
+    --text_model_finetune False \
+    --checkpoint_dir $STAGE1_CHECKPOINT_DIR \
+    --wandb_project "${BASE_WANDB_PROJECT}-stage1"
+
+  PROJECTOR_WEIGHTS_PATH="$STAGE1_CHECKPOINT_DIR/projector_weights.pt"
+  if [ ! -f "$PROJECTOR_WEIGHTS_PATH" ]; then
+    echo "Error: Stage 1 failed. Projector weights not found at $PROJECTOR_WEIGHTS_PATH"
+    exit 1
+  fi
+
+  GO_PROJECTOR_WEIGHTS_PATH="$STAGE1_CHECKPOINT_DIR/go_projection_weights.pt"
+  GO_ENCODER_WEIGHTS_PATH="$STAGE1_CHECKPOINT_DIR/go_encoder_weights.pt"
+  if [ ! -f "$GO_PROJECTOR_WEIGHTS_PATH" ] || [ ! -f "$GO_ENCODER_WEIGHTS_PATH" ]; then
+    echo "Error: Stage 1 failed. GO projector or GO encoder weights not found"
+    exit 1
+  fi
+
+  echo "--- Stage 1 Complete. Projector weights saved to $PROJECTOR_WEIGHTS_PATH"
+  echo "--- Stage 1 Complete. GO projector weights saved to $GO_PROJECTOR_WEIGHTS_PATH"
+  echo "--- Stage 1 Complete. GO encoder weights saved to $GO_ENCODER_WEIGHTS_PATH"
+else
+  echo "--- Skipping Stage 1. Stage 2 will warm-start directly from comparison model projector / GO weights"
 fi
-
-GO_PROJECTOR_WEIGHTS_PATH="$STAGE1_CHECKPOINT_DIR/go_projection_weights.pt"
-GO_ENCODER_WEIGHTS_PATH="$STAGE1_CHECKPOINT_DIR/go_encoder_weights.pt"
-if [ ! -f "$GO_PROJECTOR_WEIGHTS_PATH" ] || [ ! -f "$GO_ENCODER_WEIGHTS_PATH" ]; then
-  echo "Error: Stage 1 failed. GO projector or GO encoder weights not found"
-  exit 1
-fi
-
-echo "--- Stage 1 Complete. Projector weights saved to $PROJECTOR_WEIGHTS_PATH"
-echo "--- Stage 1 Complete. GO projector weights saved to $GO_PROJECTOR_WEIGHTS_PATH"
-echo "--- Stage 1 Complete. GO encoder weights saved to $GO_ENCODER_WEIGHTS_PATH"
 # ===================================================================================================
 
 
